@@ -3,7 +3,8 @@ const config = require('../config/config');
 const Logger = require('./utils/logger');
 const connectionPoolManager = require('./services/connectionPoolManager');
 const schemaValidationService = require('./services/schemaValidationService');
-const redisService = require('./services/redisService');
+const RedisService = require("./services/redisService");
+const redisService = new RedisService();
 
 const PORT = config.server.port;
 
