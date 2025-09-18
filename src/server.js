@@ -13,7 +13,7 @@ async function startServer() {
     Logger.info('Starting Database CRUD Server...');
 
     // Initialize Redis service
-    // await redisService.connect(); // Temporarily disabled
+    await redisService.connect();
     Logger.info('Redis service connected');
 
     // Initialize connection pool manager
@@ -39,7 +39,7 @@ async function startServer() {
           Logger.info('HTTP server closed');
           
           // Close Redis connection
-          // await redisService.disconnect(); // Temporarily disabled
+          await redisService.disconnect();
           Logger.info('Redis connection closed');
           
           Logger.info('Database CRUD Server shutdown complete');
