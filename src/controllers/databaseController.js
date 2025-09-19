@@ -8,6 +8,43 @@ const redisService = require('../services/redisService');
 const { v4: uuidv4 } = require('uuid');
 
 class DatabaseController {
+  // Helper method to check if collection access is allowed
+  static isCollectionAllowed(pool, collectionName) {
+    // If no pool or schema enforcement is disabled, allow all
+    if (!pool || !pool.enforceSchema) {
+      return { allowed: true, reason: 'Schema enforcement disabled' };
+    }
+    
+    // If no allowed collections specified, allow all
+    if (!pool.allowedCollections || pool.allowedCollections.length === 0) {
+      return { allowed: true, reason: 'No collection restrictions' };
+    }
+    
+    // Check for wildcard access
+    const hasWildcard = pool.allowedCollections.some(item => item === '*');
+    if (hasWildcard) {
+      return { allowed: true, reason: 'Wildcard access granted' };
+    }
+    
+    // Check specific collection permissions
+    const allowedCollection = pool.allowedCollections.find(item => 
+      typeof item === 'object' && item.name === collectionName
+    );
+    
+    if (allowedCollection) {
+      return { 
+        allowed: true, 
+        reason: 'Collection explicitly allowed',
+        permissions: allowedCollection.permissions || { read: true, write: true, delete: false }
+      };
+    }
+    
+    return { 
+      allowed: false, 
+      reason: `Collection '${collectionName}' not in allowed list` 
+    };
+  }
+
   // Get collections in a database
   static async getCollections(req, res, next) {
     const startTime = Date.now();
@@ -35,8 +72,28 @@ class DatabaseController {
       let filteredCollections = collections;
       
       if (pool && pool.enforceSchema && pool.allowedCollections.length > 0) {
-        const allowedNames = pool.allowedCollections.map(c => c.name);
-        filteredCollections = collections.filter(c => allowedNames.includes(c.name));
+        // Check if wildcard is used (allow all collections)
+        const hasWildcard = pool.allowedCollections.some(item => item === '*');
+        
+        if (!hasWildcard) {
+          // Filter to only allowed collections
+          const allowedNames = pool.allowedCollections
+            .filter(c => typeof c === 'object' && c.name)
+            .map(c => c.name);
+          filteredCollections = collections.filter(c => allowedNames.includes(c.name));
+          
+          Logger.debug('Filtered collections based on allowed list', {
+            subaccountId,
+            totalCollections: collections.length,
+            allowedCollections: allowedNames,
+            filteredCount: filteredCollections.length
+          });
+        } else {
+          Logger.debug('Wildcard access - allowing all collections', {
+            subaccountId,
+            totalCollections: collections.length
+          });
+        }
       }
 
       // Get collection stats
@@ -142,21 +199,50 @@ class DatabaseController {
     }
   }
 
-  // Execute find operation
+  // Find documents in a collection
   static async find(req, res, next) {
-    const startTime = Date.now();
     const operationId = uuidv4();
-
+    const startTime = Date.now();
+    
     try {
       const { subaccountId, collection } = req.params;
       const { query = {}, options = {} } = req.body;
       const userId = req.user.id;
 
-      Logger.debug('Executing find operation', {
+      Logger.info('Find operation started', {
         operationId,
+        userId,
         subaccountId,
         collection,
-        userId
+        queryKeys: Object.keys(query)
+      });
+
+      // Get connection and pool info
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+      const pool = connectionPoolManager.pools.get(subaccountId);
+
+      // Check collection access
+      const accessCheck = this.isCollectionAllowed(pool, collection);
+      if (!accessCheck.allowed) {
+        Logger.security('Collection access denied', 'medium', {
+          userId,
+          subaccountId,
+          collection,
+          reason: accessCheck.reason
+        });
+
+        return res.status(403).json({
+          success: false,
+          message: accessCheck.reason,
+          code: 'COLLECTION_ACCESS_DENIED'
+        });
+      }
+
+      Logger.debug('Collection access granted', {
+        operationId,
+        collection,
+        reason: accessCheck.reason
       });
 
       // Validate query
