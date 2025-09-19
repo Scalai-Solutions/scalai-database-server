@@ -4,7 +4,7 @@ const Logger = require('../utils/logger');
 const connectionPoolManager = require('../services/connectionPoolManager');
 const schemaValidationService = require('../services/schemaValidationService');
 const redisService = require('../services/redisService');
-const AuditLog = require('../../auth-server/src/models/AuditLog');
+// const AuditLog = require('../../scalai-auth-server/src/models/AuditLog'); // TODO: Move to shared models package
 const { v4: uuidv4 } = require('uuid');
 
 class DatabaseController {
@@ -896,6 +896,327 @@ class DatabaseController {
     }
   }
 
+  // Update many documents
+  static async updateMany(req, res, next) {
+    const operationId = uuidv4();
+    const startTime = Date.now();
+    
+    try {
+      const { subaccountId, collection } = req.params;
+      const { filter, update, options = {} } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('UpdateMany operation started', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        filterKeys: Object.keys(filter || {}),
+        updateKeys: Object.keys(update || {})
+      });
+
+      // Execute update many operation
+      const connection = await connectionPoolManager.getConnection(subaccountId, userId);
+      const db = connection.db();
+      const coll = db.collection(collection);
+
+      const result = await coll.updateMany(filter, update, {
+        ...options,
+        maxTimeMS: config.queryLimits.maxExecutionTime
+      });
+
+      const duration = Date.now() - startTime;
+
+      // Log operation for audit
+      await this.logOperation({
+        operationId,
+        userId,
+        subaccountId,
+        operation: 'updateMany',
+        collection,
+        filter,
+        update,
+        options,
+        result: {
+          success: true,
+          matchedCount: result.matchedCount,
+          modifiedCount: result.modifiedCount,
+          upsertedCount: result.upsertedCount
+        },
+        duration,
+        timestamp: new Date()
+      });
+
+      Logger.info('UpdateMany operation completed', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        data: {
+          matchedCount: result.matchedCount,
+          modifiedCount: result.modifiedCount,
+          upsertedCount: result.upsertedCount,
+          upsertedId: result.upsertedId
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          collection,
+          operation: 'updateMany'
+        }
+      });
+
+    } catch (error) {
+      await this.handleError(error, req, operationId, 'updateMany', startTime);
+      next(error);
+    }
+  }
+
+  // Delete many documents
+  static async deleteMany(req, res, next) {
+    const operationId = uuidv4();
+    const startTime = Date.now();
+    
+    try {
+      const { subaccountId, collection } = req.params;
+      const { filter, options = {} } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('DeleteMany operation started', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        filterKeys: Object.keys(filter || {})
+      });
+
+      // Execute delete many operation
+      const connection = await connectionPoolManager.getConnection(subaccountId, userId);
+      const db = connection.db();
+      const coll = db.collection(collection);
+
+      const result = await coll.deleteMany(filter, {
+        ...options,
+        maxTimeMS: config.queryLimits.maxExecutionTime
+      });
+
+      const duration = Date.now() - startTime;
+
+      // Log operation for audit
+      await this.logOperation({
+        operationId,
+        userId,
+        subaccountId,
+        operation: 'deleteMany',
+        collection,
+        filter,
+        options,
+        result: {
+          success: true,
+          deletedCount: result.deletedCount
+        },
+        duration,
+        timestamp: new Date()
+      });
+
+      Logger.info('DeleteMany operation completed', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        deletedCount: result.deletedCount,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        data: {
+          deletedCount: result.deletedCount
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          collection,
+          operation: 'deleteMany'
+        }
+      });
+
+    } catch (error) {
+      await this.handleError(error, req, operationId, 'deleteMany', startTime);
+      next(error);
+    }
+  }
+
+  // Count documents
+  static async count(req, res, next) {
+    const operationId = uuidv4();
+    const startTime = Date.now();
+    
+    try {
+      const { subaccountId, collection } = req.params;
+      const { query = {}, options = {} } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('Count operation started', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        queryKeys: Object.keys(query)
+      });
+
+      // Execute count operation
+      const connection = await connectionPoolManager.getConnection(subaccountId, userId);
+      const db = connection.db();
+      const coll = db.collection(collection);
+
+      const count = await coll.countDocuments(query, {
+        ...options,
+        maxTimeMS: config.queryLimits.maxExecutionTime
+      });
+
+      const duration = Date.now() - startTime;
+
+      // Log operation for audit
+      await this.logOperation({
+        operationId,
+        userId,
+        subaccountId,
+        operation: 'count',
+        collection,
+        query,
+        options,
+        result: {
+          success: true,
+          count
+        },
+        duration,
+        timestamp: new Date()
+      });
+
+      Logger.info('Count operation completed', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        count,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        data: {
+          count
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          collection,
+          operation: 'count'
+        }
+      });
+
+    } catch (error) {
+      await this.handleError(error, req, operationId, 'count', startTime);
+      next(error);
+    }
+  }
+
+  // Get distinct values
+  static async distinct(req, res, next) {
+    const operationId = uuidv4();
+    const startTime = Date.now();
+    
+    try {
+      const { subaccountId, collection } = req.params;
+      const { field, query = {}, options = {} } = req.body;
+      const userId = req.user.id;
+
+      if (!field) {
+        return res.status(400).json({
+          success: false,
+          message: 'Field parameter is required for distinct operation',
+          code: 'FIELD_REQUIRED'
+        });
+      }
+
+      Logger.info('Distinct operation started', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        field,
+        queryKeys: Object.keys(query)
+      });
+
+      // Execute distinct operation
+      const connection = await connectionPoolManager.getConnection(subaccountId, userId);
+      const db = connection.db();
+      const coll = db.collection(collection);
+
+      const values = await coll.distinct(field, query, {
+        ...options,
+        maxTimeMS: config.queryLimits.maxExecutionTime
+      });
+
+      const duration = Date.now() - startTime;
+
+      // Log operation for audit
+      await this.logOperation({
+        operationId,
+        userId,
+        subaccountId,
+        operation: 'distinct',
+        collection,
+        field,
+        query,
+        options,
+        result: {
+          success: true,
+          count: values.length
+        },
+        duration,
+        timestamp: new Date()
+      });
+
+      Logger.info('Distinct operation completed', {
+        operationId,
+        userId,
+        subaccountId,
+        collection,
+        field,
+        distinctCount: values.length,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        data: {
+          field,
+          values,
+          count: values.length
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          collection,
+          operation: 'distinct'
+        }
+      });
+
+    } catch (error) {
+      await this.handleError(error, req, operationId, 'distinct', startTime);
+      next(error);
+    }
+  }
+
   // Helper methods
   static sanitizeOptions(options) {
     const sanitized = { ...options };
@@ -941,7 +1262,9 @@ class DatabaseController {
   static async logOperation(operationData) {
     try {
       if (config.security.enableAuditLogging) {
-        await AuditLog.logOperation(operationData);
+        // TODO: Implement audit logging with shared models package
+        // await AuditLog.logOperation(operationData);
+        Logger.info('Operation logged', operationData);
       }
     } catch (error) {
       Logger.error('Failed to log operation', {
