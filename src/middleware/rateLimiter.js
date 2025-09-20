@@ -6,30 +6,30 @@ class MemoryRateLimitStore {
   constructor() {
     this.store = new Map();
     this.cleanupInterval = setInterval(() => {
-      const now = Date.now();
+  const now = Date.now();
       for (const [key, data] of this.store.entries()) {
         if (now - data.windowStart > data.windowMs) {
           this.store.delete(key);
-        }
-      }
+    }
+  }
     }, 60000); // Clean up every minute
   }
 
   incr(key, windowMs, maxRequests) {
     const now = Date.now();
     let entry = this.store.get(key);
-
+  
     if (!entry || (now - entry.windowStart) > windowMs) {
       // Create new window
       entry = {
-        count: 1,
+      count: 1,
         windowStart: now,
         windowMs,
         maxRequests
       };
       this.store.set(key, entry);
       return { count: 1, resetTime: now + windowMs };
-    }
+  }
 
     // Increment existing window
     entry.count++;
@@ -65,16 +65,16 @@ const createRateLimiter = (maxRequests, windowMs, keyGenerator) => {
         resetTime: new Date(result.resetTime)
       });
       
-      return res.status(429).json({
-        success: false,
+    return res.status(429).json({
+      success: false,
         message: 'Too many requests, please try again later',
         code: 'RATE_LIMIT_EXCEEDED',
         retryAfter: Math.ceil((result.resetTime - Date.now()) / 1000)
-      });
-    }
+    });
+  }
 
-    next();
-  };
+  next();
+};
 };
 
 // General rate limiter
