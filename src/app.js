@@ -14,6 +14,9 @@ const databaseRoutes = require('./routes/databaseRoutes');
 
 const app = express();
 
+// Trust proxy for accurate IP addresses (required for Heroku)
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet());
 app.use(cors({
