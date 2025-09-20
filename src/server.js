@@ -10,8 +10,8 @@ const PORT = config.server.port;
 
 async function startServer() {
   try {
-    console.log('[DEBUG] Starting Database CRUD Server...');
-    Logger.info('Starting Database CRUD Server...');
+    console.log('[DEBUG] Starting ScalAI CRUD Server...');
+    Logger.info('Starting ScalAI CRUD Server...');
 
     // Initialize Redis service (optional - continue if fails)
     console.log('[DEBUG] Initializing Redis...');
@@ -40,8 +40,8 @@ async function startServer() {
     console.log('[DEBUG] Starting HTTP server on port', PORT);
     const server = app.listen(PORT, () => {
       console.log('[DEBUG] HTTP server started successfully');
-      Logger.info(`🗄️  Database CRUD Server running on port ${PORT} in ${config.server.nodeEnv} mode`);
-      Logger.info('Server ready to handle database operations');
+      Logger.info(`🤖 ScalAI CRUD Server running on port ${PORT} in ${config.server.nodeEnv} mode`);
+      Logger.info('Server ready to handle agent database operations');
     });
 
     // Graceful shutdown

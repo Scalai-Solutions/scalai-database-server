@@ -11,7 +11,6 @@ const { generalLimiter } = require('./middleware/rateLimiter');
 // Import routes
 const healthRoutes = require('./routes/healthRoutes');
 const databaseRoutes = require('./routes/databaseRoutes');
-const llmRoutes = require('./routes/llmRoutes');
 
 const app = express();
 
@@ -37,19 +36,17 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Routes
 app.use('/api/health', healthRoutes);
 app.use('/api/database', databaseRoutes);
-app.use('/api/llm', llmRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'ScalAI Database Server API',
+    message: 'ScalAI Database CRUD Server',
     version: '1.0.0',
     timestamp: new Date(),
     endpoints: {
       health: '/api/health',
-      database: '/api/database',
-      llm: '/api/llm'
+      database: '/api/database'
     }
   });
 });

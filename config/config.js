@@ -4,7 +4,7 @@ const config = {
   server: {
     port: process.env.PORT || process.env.DATABASE_PORT || 3002,
     nodeEnv: process.env.NODE_ENV || 'development',
-    serviceName: 'database-server'
+    serviceName: 'crud-server'
   },
   
   jwt: {
