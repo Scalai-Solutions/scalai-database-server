@@ -24,6 +24,7 @@ router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
 
+
 // Basic CRUD Operations with Dynamic RBAC
 
 // GET /api/database/:subaccountId/collections - List collections
