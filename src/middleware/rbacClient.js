@@ -127,6 +127,68 @@ const requirePermission = (resourceName, requiredPermission = 'read') => {
   };
 };
 
+// Dynamic resource permission middleware that maps endpoints to permissions
+const requireResourcePermission = () => {
+  // Map of endpoint patterns to required permissions based on the agent resource
+  const endpointPermissions = {
+    'GET /api/database/:subaccountId/collections': 'read',
+    'POST /api/database/:subaccountId/collections/:collection/find': 'read',
+    'POST /api/database/:subaccountId/collections/:collection/insertOne': 'write',
+    'POST /api/database/:subaccountId/collections/:collection/updateOne': 'write',
+    'POST /api/database/:subaccountId/collections/:collection/deleteOne': 'delete'
+  };
+
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Authentication required',
+          code: 'AUTH_REQUIRED'
+        });
+      }
+
+      const method = req.method;
+      const routePath = req.route?.path;
+      const endpointKey = `${method} /api/database${routePath}`;
+      
+      // Get required permission for this endpoint
+      const requiredPermission = endpointPermissions[endpointKey];
+      
+      if (!requiredPermission) {
+        Logger.security('Unprotected endpoint accessed', 'low', {
+          method,
+          path: routePath,
+          userId: req.user.id,
+          endpoint: req.originalUrl
+        });
+        
+        return res.status(403).json({
+          success: false,
+          message: 'Endpoint not protected by RBAC system',
+          code: 'UNPROTECTED_ENDPOINT'
+        });
+      }
+
+      // Use the agent resource with the determined permission
+      return requirePermission('agent', requiredPermission)(req, res, next);
+
+    } catch (error) {
+      Logger.error('Resource permission middleware error', {
+        error: error.message,
+        userId: req.user?.id,
+        endpoint: req.originalUrl
+      });
+
+      res.status(500).json({
+        success: false,
+        message: 'Resource permission check failed',
+        code: 'RESOURCE_PERMISSION_ERROR'
+      });
+    }
+  };
+};
+
 // Pre-built permission checks for database server
 const databasePermissions = {
   read: requirePermission('database_operations', 'read'),
@@ -138,5 +200,6 @@ const databasePermissions = {
 module.exports = {
   rbacClient,
   requirePermission,
+  requireResourcePermission,
   databasePermissions
 }; 

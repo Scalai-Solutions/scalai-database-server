@@ -7,7 +7,7 @@ const DatabaseController = require('../controllers/databaseController');
 // Import middleware
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
-const { requirePermission } = require('../middleware/rbacClient');
+const { requireResourcePermission } = require('../middleware/rbacClient');
 
 // Import validators
 const { 
@@ -24,12 +24,12 @@ router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
 
-// Basic CRUD Operations with RBAC
+// Basic CRUD Operations with Dynamic RBAC
 
 // GET /api/database/:subaccountId/collections - List collections
 router.get('/:subaccountId/collections',
   validateSubaccountId,
-  requirePermission('agent', 'read'),
+  requireResourcePermission(),
   DatabaseController.getCollections
 );
 
@@ -38,7 +38,7 @@ router.post('/:subaccountId/collections/:collection/find',
   validateSubaccountId,
   validateCollectionName,
   validateQueryBody,
-  requirePermission('agent', 'read'),
+  requireResourcePermission(),
   subaccountLimiter(200, 60000),
   DatabaseController.find
 );
@@ -48,7 +48,7 @@ router.post('/:subaccountId/collections/:collection/insertOne',
   validateSubaccountId,
   validateCollectionName,
   validateInsertBody,
-  requirePermission('agent', 'write'),
+  requireResourcePermission(),
   subaccountLimiter(100, 60000),
   DatabaseController.insertOne
 );
@@ -58,7 +58,7 @@ router.post('/:subaccountId/collections/:collection/updateOne',
   validateSubaccountId,
   validateCollectionName,
   validateUpdateBody,
-  requirePermission('agent', 'write'),
+  requireResourcePermission(),
   subaccountLimiter(100, 60000),
   DatabaseController.updateOne
 );
@@ -68,7 +68,7 @@ router.post('/:subaccountId/collections/:collection/deleteOne',
   validateSubaccountId,
   validateCollectionName,
   validateDeleteBody,
-  requirePermission('agent', 'delete'),
+  requireResourcePermission(),
   subaccountLimiter(50, 60000),
   DatabaseController.deleteOne
 );
