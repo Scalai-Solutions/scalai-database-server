@@ -7,10 +7,17 @@ const config = require('../config/config');
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
 const { generalLimiter } = require('./middleware/rateLimiter');
-
+// console.log("Importing healthRoutes");
 // Import routes
 const healthRoutes = require('./routes/healthRoutes');
 const databaseRoutes = require('./routes/databaseRoutes');
+const cacheRoutes = require('./routes/cacheRoutes');
+const callRoutes = require('./routes/callRoutes');
+const chatRoutes = require('./routes/chatRoutes');
+const connectorRoutes = require('./routes/connectorRoutes');
+const homeRoutes = require('./routes/homeRoutes');
+const activityRoutes = require('./routes/activityRoutes');
+const aiInsightsRoutes = require('./routes/aiInsightsRoutes');
 
 const app = express();
 
@@ -35,10 +42,18 @@ app.use(generalLimiter);
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
 // Routes
 app.use('/api/health', healthRoutes);
+// Temporarily disable database routes to test
 app.use('/api/database', databaseRoutes);
+// Temporarily disable cache routes to test
+app.use('/api/cache', cacheRoutes);
+app.use('/api/calls', callRoutes);
+app.use('/api/chats', chatRoutes);
+app.use('/api/connectors', connectorRoutes);
+app.use('/api/home', homeRoutes);
+app.use('/api/activities', activityRoutes);
+app.use('/api/ai-insights', aiInsightsRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -49,7 +64,14 @@ app.get('/', (req, res) => {
     timestamp: new Date(),
     endpoints: {
       health: '/api/health',
-      database: '/api/database'
+      database: '/api/database',
+      cache: '/api/cache',
+      calls: '/api/calls',
+      chats: '/api/chats',
+      connectors: '/api/connectors',
+      home: '/api/home',
+      activities: '/api/activities',
+      aiInsights: '/api/ai-insights'
     }
   });
 });

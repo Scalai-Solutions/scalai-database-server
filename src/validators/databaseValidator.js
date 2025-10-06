@@ -60,6 +60,79 @@ const aggregateBodySchema = Joi.object({
   }).optional().default({})
 });
 
+const createAgentBodySchema = Joi.object({
+  name: Joi.string()
+    .min(1)
+    .max(200)
+    .required()
+    .messages({
+      'string.empty': 'Name is required',
+      'string.min': 'Name must be at least 1 character long',
+      'string.max': 'Name must not exceed 200 characters',
+      'any.required': 'Name is required'
+    }),
+  description: Joi.string()
+    .min(1)
+    .max(1000)
+    .required()
+    .messages({
+      'string.empty': 'Description is required',
+      'string.min': 'Description must be at least 1 character long',
+      'string.max': 'Description must not exceed 1000 characters',
+      'any.required': 'Description is required'
+    })
+});
+
+const agentIdSchema = Joi.string()
+  .required()
+  .messages({
+    'string.empty': 'Agent ID is required',
+    'any.required': 'Agent ID is required'
+  });
+
+const updateAgentDetailsBodySchema = Joi.object({
+  beginMessage: Joi.string()
+    .min(0)
+    .max(2000)
+    .optional()
+    .messages({
+      'string.max': 'Begin message must not exceed 2000 characters'
+    }),
+  generalPrompt: Joi.string()
+    .min(0)
+    .max(10000)
+    .optional()
+    .messages({
+      'string.max': 'General prompt must not exceed 10000 characters'
+    }),
+  voiceId: Joi.string()
+    .optional()
+    .messages({
+      'string.empty': 'Voice ID cannot be empty'
+    }),
+  emailTemplate: Joi.string()
+    .optional()
+    .messages({
+      'string.empty': 'Email template cannot be empty'
+    }),
+  model: Joi.string()
+    .optional()
+    .messages({
+      'string.empty': 'Model cannot be empty'
+    })
+}).min(1).messages({
+  'object.min': 'At least one field must be provided for update'
+});
+
+const activateChatAgentBodySchema = Joi.object({
+  activated: Joi.boolean()
+    .required()
+    .messages({
+      'boolean.base': 'Activated must be a boolean value',
+      'any.required': 'Activated field is required'
+    })
+});
+
 // Validation middleware factory
 const validate = (schema) => {
   return (req, res, next) => {
@@ -130,5 +203,9 @@ module.exports = {
   validateInsertBody: validate(insertBodySchema),
   validateUpdateBody: validate(updateBodySchema),
   validateDeleteBody: validate(deleteBodySchema),
-  validateAggregateBody: validate(aggregateBodySchema)
+  validateAggregateBody: validate(aggregateBodySchema),
+  validateCreateAgentBody: validate(createAgentBodySchema),
+  validateAgentId: validateParam('agentId', agentIdSchema),
+  validateUpdateAgentDetailsBody: validate(updateAgentDetailsBodySchema),
+  validateActivateChatAgentBody: validate(activateChatAgentBodySchema)
 }; 

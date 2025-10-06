@@ -3,6 +3,7 @@ const config = require('../../config/config');
 const Logger = require('../utils/logger');
 const redisService = require('./redisService');
 const axios = require('axios');
+const crypto = require('crypto');
 
 class ConnectionPoolManager {
   constructor() {
@@ -14,6 +15,23 @@ class ConnectionPoolManager {
     this.idleTimeout = config.connectionPool.idleTimeout;
     this.retryAttempts = config.connectionPool.retryAttempts;
     this.retryDelay = config.connectionPool.retryDelay;
+  }
+
+  // Decrypt MongoDB connection string
+  decryptConnectionString(encrypted, iv, authTag) {
+    try {
+      const algorithm = 'aes-256-cbc';
+      const secretKey = crypto.scryptSync(config.encryption.key, 'subaccount-salt', 32);
+      
+      const decipher = crypto.createDecipheriv(algorithm, secretKey, Buffer.from(iv, 'hex'));
+      
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      
+      return decrypted;
+    } catch (error) {
+      throw new Error('Failed to decrypt connection string: ' + error.message);
+    }
   }
 
   async initialize() {
@@ -75,6 +93,10 @@ class ConnectionPoolManager {
         connection,
         subaccountId,
         userId,
+        databaseName: pool.databaseName,
+        activatedConnectors: pool.activatedConnectors || [
+         
+        ],
         release: () => this.releaseConnection(subaccountId)
       };
 
@@ -100,16 +122,16 @@ class ConnectionPoolManager {
         throw new Error('Failed to get subaccount details');
       }
 
-      // Create mongoose connection
+      // Create mongoose connection with retry logic
       const connectionOptions = {
         maxPoolSize: this.maxConnectionsPerSubaccount,
         minPoolSize: 2, // Keep minimum 2 connections ready
         serverSelectionTimeoutMS: this.connectionTimeout,
         socketTimeoutMS: 45000,
         connectTimeoutMS: this.connectionTimeout,
-                 heartbeatFrequencyMS: 10000,
-         maxIdleTimeMS: this.idleTimeout,
-         retryWrites: true,
+        heartbeatFrequencyMS: 10000,
+        maxIdleTimeMS: this.idleTimeout,
+        retryWrites: true,
         retryReads: true,
         readPreference: 'primary',
         
@@ -120,22 +142,150 @@ class ConnectionPoolManager {
       Logger.debug('Creating mongoose connection', {
         subaccountId,
         databaseName: subaccountDetails.databaseName,
-        maxPoolSize: this.maxConnectionsPerSubaccount
+        maxPoolSize: this.maxConnectionsPerSubaccount,
+        mongodbUrl: subaccountDetails.mongodbUrl ? '[REDACTED]' : 'undefined'
       });
+      
+      if (!subaccountDetails.mongodbUrl) {
+        throw new Error('MongoDB URL is missing from subaccount details');
+      }
+      
+      console.log("Connection options", {
+        ...subaccountDetails,
+        mongodbUrl: '[REDACTED]' // Don't log the actual URL
+      });
+      
+      // Retry logic for connection creation
+      let connection = null;
+      let lastError = null;
+      
+      for (let attempt = 1; attempt <= this.retryAttempts; attempt++) {
+        try {
+          Logger.debug('Connection attempt', { subaccountId, attempt, maxAttempts: this.retryAttempts });
+          
+          connection = mongoose.createConnection(
+            subaccountDetails.mongodbUrl,
+            connectionOptions
+          );
 
-      const connection = await mongoose.createConnection(
-        subaccountDetails.mongodbUrl,
-        connectionOptions
-      );
+          // Wait for the connection to be ready
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('Connection timeout'));
+            }, this.connectionTimeout);
+
+            connection.once('connected', () => {
+              clearTimeout(timeout);
+              resolve();
+            });
+
+            connection.once('error', (error) => {
+              clearTimeout(timeout);
+              reject(error);
+            });
+          });
+          
+          // If we got here, connection succeeded
+          Logger.info('Connection established successfully', { 
+            subaccountId, 
+            attempt,
+            totalAttempts: attempt
+          });
+          break;
+          
+        } catch (error) {
+          lastError = error;
+          
+          // Check if this is a DNS or network error that we should retry
+          const isDNSError = error.message.includes('querySrv') || 
+                            error.message.includes('ECONNREFUSED') ||
+                            error.message.includes('ETIMEDOUT') ||
+                            error.message.includes('ENOTFOUND') ||
+                            error.message.includes('EAI_AGAIN');
+          
+          Logger.warn('Connection attempt failed', {
+            subaccountId,
+            attempt,
+            maxAttempts: this.retryAttempts,
+            error: error.message,
+            isDNSError,
+            willRetry: attempt < this.retryAttempts
+          });
+          
+          // Close the failed connection
+          if (connection) {
+            try {
+              await connection.close();
+            } catch (closeError) {
+              Logger.debug('Failed to close connection after error', {
+                error: closeError.message
+              });
+            }
+            connection = null;
+          }
+          
+          // If this was the last attempt, throw the error
+          if (attempt >= this.retryAttempts) {
+            throw new Error(`Failed to create connection after ${this.retryAttempts} attempts: ${error.message}`);
+          }
+          
+          // Wait before retrying (exponential backoff)
+          const backoffDelay = this.retryDelay * Math.pow(2, attempt - 1);
+          Logger.debug('Waiting before retry', { 
+            subaccountId, 
+            delayMs: backoffDelay,
+            nextAttempt: attempt + 1
+          });
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
+        }
+      }
+      
+      if (!connection) {
+        throw lastError || new Error('Failed to create connection');
+      }
 
       // Test the connection
-      await connection.db.admin().ping();
+      try {
+        await connection.db.admin().ping();
+        Logger.debug('MongoDB connection ping successful', { subaccountId });
+      } catch (pingError) {
+        Logger.error('MongoDB connection ping failed', {
+          subaccountId,
+          error: pingError.message
+        });
+        
+        // Check if database exists by trying to list collections
+        try {
+          const collections = await connection.db.listCollections().toArray();
+          Logger.info('Database exists but ping failed, continuing anyway', {
+            subaccountId,
+            collectionsCount: collections.length
+          });
+        } catch (listError) {
+          Logger.warn('Database might not exist', {
+            subaccountId,
+            databaseName: subaccountDetails.databaseName,
+            error: listError.message
+          });
+          
+          // Create the database by inserting a temporary document
+          try {
+            const tempCollection = connection.db.collection('_temp_init');
+            await tempCollection.insertOne({ _init: true, createdAt: new Date() });
+            await tempCollection.deleteOne({ _init: true });
+            Logger.info('Database initialized successfully', { subaccountId });
+          } catch (initError) {
+            throw new Error(`Failed to initialize database: ${initError.message}`);
+          }
+        }
+      }
 
       // Create pool object
       const pool = {
         subaccountId,
         connection,
         databaseName: subaccountDetails.databaseName,
+        activatedConnectors: subaccountDetails.activatedConnectors,
         createdAt: new Date(),
         lastUsed: new Date(),
         isHealthy: true,
@@ -190,33 +340,66 @@ class ConnectionPoolManager {
   // Get subaccount details from tenant manager
   async getSubaccountDetails(subaccountId, userId) {
     try {
+      console.log("Getting subaccount details", { subaccountId, userId });
       // First check Redis cache
       const cacheKey = `${config.redis.prefixes.connectionPool}${subaccountId}`;
       const cachedDetails = await redisService.get(cacheKey);
       
       if (cachedDetails) {
-        Logger.debug('Using cached subaccount details', { subaccountId });
+        
+        Logger.debug('Using cached subaccount details', { subaccountId, cacheKey });
         return cachedDetails;
       }
+      const token = await this.getServiceToken();
 
-      // Get from tenant manager
+      console.log("Token", token);
+      // Get from tenant manager using service token
       const response = await axios.get(
         `${config.tenantManager.url}/api/subaccounts/${subaccountId}`,
         {
           headers: {
-            'Authorization': `Bearer ${this.getServiceToken()}`,
-            'X-User-ID': userId
+            'X-Service-Token': token,
+            'X-User-ID': userId,
+            'X-Service-Name': 'database-server',
+            'Content-Type': 'application/json'
           },
           timeout: config.tenantManager.timeout
         }
       );
 
+      console.log("Response", response.data);
+
       if (!response.data.success) {
         throw new Error(response.data.message || 'Failed to get subaccount details');
       }
 
+      let mongodbUrl = response.data.data.mongodbUrl;
+      
+      // If the MongoDB URL is encrypted, decrypt it
+      if (response.data.data.encryptionIV && response.data.data.encryptionAuthTag) {
+        try {
+          mongodbUrl = this.decryptConnectionString(
+            response.data.data.mongodbUrl,
+            response.data.data.encryptionIV,
+            response.data.data.encryptionAuthTag
+          );
+          Logger.debug('MongoDB URL decrypted successfully', { subaccountId });
+        } catch (error) {
+          Logger.error('Failed to decrypt MongoDB URL', {
+            subaccountId,
+            error: error.message
+          });
+          throw new Error('Failed to decrypt database connection');
+        }
+      }
+
       const subaccountDetails = {
-        mongodbUrl: response.data.data.mongodbUrl, // This will be decrypted by tenant manager
+        mongodbUrl: mongodbUrl,
+        subaccountId: subaccountId,
+        activatedConnectors: response.data.data.activatedConnectors || [
+          // Default to google_calendar if not specified (backward compatibility)
+        
+        ],
         databaseName: response.data.data.databaseName,
         enforceSchema: response.data.data.enforceSchema,
         allowedCollections: response.data.data.allowedCollections,
@@ -622,10 +805,40 @@ class ConnectionPoolManager {
   }
 
   // Get service token for tenant manager communication
-  getServiceToken() {
-    // This should be a service-to-service token
-    // For now, we'll use a placeholder - in production, implement proper service authentication
-    return process.env.DATABASE_SERVICE_TOKEN || 'service-token-placeholder';
+  async getServiceToken() {
+    // Use the service token from environment variables
+    const serviceToken = config.serviceToken.token;
+    
+    if (!serviceToken) {
+      throw new Error('DATABASE_SERVER_SERVICE_TOKEN environment variable is not set');
+    }
+    
+    // Validate the service token with auth server to ensure it's still active
+    try {
+      const validationResponse = await axios.post(
+        `${config.serviceToken.authServerUrl}/api/auth/validate-service-token`,
+        {},
+        {
+          headers: {
+            'X-Service-Token': serviceToken,
+            'Content-Type': 'application/json'
+          },
+          timeout: 5000
+        }
+      );
+      
+      if (validationResponse.data.success) {
+        Logger.debug('Service token validated successfully');
+        return serviceToken;
+      } else {
+        throw new Error('Service token validation failed');
+      }
+    } catch (error) {
+      Logger.error('Failed to validate service token', {
+        error: error.message
+      });
+      throw new Error('Service token validation failed: ' + error.message);
+    }
   }
 
   // Graceful shutdown

@@ -12,16 +12,36 @@ const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '24h'
   },
   
+  // Encryption settings for decrypting subaccount connection strings
+  encryption: {
+    key: process.env.ENCRYPTION_KEY,
+    algorithm: 'aes-256-cbc'
+  },
+  
   // Tenant Manager configuration
   tenantManager: {
     url: process.env.TENANT_MANAGER_URL || 'http://localhost:3003',
-    timeout: 10000
+    timeout: 100000
   },
   
   // Auth Server configuration  
   authServer: {
     url: process.env.AUTH_SERVER_URL || 'http://localhost:3001',
-    timeout: 10000
+    timeout: 100000
+  },
+
+  // Retell configuration
+  retell: {
+    webhookUrl: process.env.RETELL_WEBHOOK_URL,
+    deployedWebhookServerUrl: process.env.DEPLOYED_WEBHOOK_SERVER_URL
+  },
+
+  // Webhook Server configuration
+  webhookServer: {
+    url: process.env.WEBHOOK_SERVER_URL || 'http://localhost:3004',
+    deployedUrl: process.env.DEPLOYED_WEBHOOK_SERVER_URL,
+    timeout: 10000,
+    serviceToken: process.env.WEBHOOK_SERVER_SERVICE_TOKEN
   },
   
   // Redis configuration for connection pooling and caching
@@ -38,7 +58,11 @@ const config = {
       connectionPool: 'db_pool:',
       schema: 'schema:',
       stats: 'stats:',
-      rateLimit: 'db_rate:'
+      rateLimit: 'db_rate:',
+      retell: 'retell:',
+      connector: 'connector:',
+      connectorList: 'connectors:list',
+      subaccountConnectors: 'subaccount:connectors:'
     }
   },
   
@@ -114,12 +138,33 @@ const config = {
       maxSize: '20m',
       maxFiles: '14d'
     }
+  },
+
+  super_admin: {
+    email: process.env.SUPER_ADMIN_EMAIL,
+    password: process.env.SUPER_ADMIN_PASS
+  },
+
+  // Service token for service-to-service communication
+  serviceToken: {
+    token: process.env.DATABASE_SERVER_SERVICE_TOKEN,
+    authServerUrl: process.env.AUTH_SERVER_URL || 'http://localhost:3001',
+    tenantManagerToken: process.env.TENANT_MANAGER_SERVICE_TOKEN
+  },
+
+  // OpenAI configuration for AI insights
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 2000,
+    temperature: parseFloat(process.env.OPENAI_TEMPERATURE) || 0.7
   }
 };
 
 // Validate required config
 const requiredConfig = [
-  'JWT_SECRET'
+  'JWT_SECRET',
+  'ENCRYPTION_KEY'
 ];
 
 const optionalButRecommended = [

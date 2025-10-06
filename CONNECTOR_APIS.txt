@@ -1,0 +1,526 @@
+========================================
+CONNECTOR MANAGEMENT APIs - CURL EXAMPLES
+========================================
+
+Base URL: http://localhost:3002
+Replace with your actual server URL.
+
+Prerequisites:
+- JWT_TOKEN: User authentication token
+- SUBACCOUNT_ID: MongoDB ObjectId (24 hex characters)
+- CONNECTOR_ID: MongoDB ObjectId (24 hex characters)
+- SERVICE_TOKEN: Service-to-service authentication token
+
+
+========================================
+1. GET AVAILABLE CONNECTORS
+========================================
+
+Get list of all available connectors from tenant-manager.
+
+curl --location 'http://localhost:3002/api/connectors/available' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN'
+
+Response:
+{
+  "success": true,
+  "message": "Connectors retrieved successfully",
+  "data": {
+    "connectors": [
+      {
+        "id": "68e2a6d6470d750ea13bf728",
+        "type": "google_calendar",
+        "name": "Google Calendar",
+        "description": "Integrate with Google Calendar",
+        "icon": "https://cdn.example.com/google-calendar.png",
+        "category": "calendar",
+        "config": {
+          "email": ""
+        },
+        "version": "1.0.0",
+        "isActive": true,
+        "isGlobal": true,
+        "metadata": {
+          "tags": []
+        },
+        "createdAt": "2025-10-05T17:11:50.944Z",
+        "updatedAt": "2025-10-05T17:11:50.944Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 50,
+      "total": 1,
+      "pages": 1
+    }
+  },
+  "cached": false
+}
+
+
+========================================
+2. ADD CONNECTOR TO SUBACCOUNT
+========================================
+
+Add a connector to a specific subaccount. This creates a connector-subaccount relationship.
+
+curl --location 'http://localhost:3002/api/connectors/67123abc456def789012345' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{
+  "connectorId": "68e2a6d6470d750ea13bf728",
+  "config": {
+    "email": "user@example.com",
+    "refreshToken": "encrypted_token",
+    "calendarIds": ["primary"]
+  },
+  "isActive": true
+}'
+
+Response:
+{
+  "success": true,
+  "message": "Connector added successfully",
+  "data": {
+    "connector": {
+      "_id": "671abc123def456789012346",
+      "subaccountId": "67123abc456def789012345",
+      "connectorId": "68e2a6d6470d750ea13bf728",
+      "connectorType": "google_calendar",
+      "config": {
+        "email": "user@example.com",
+        "refreshToken": "encrypted_token",
+        "calendarIds": ["primary"]
+      },
+      "isActive": true,
+      "createdAt": "2025-10-05T18:00:00.000Z",
+      "updatedAt": "2025-10-05T18:00:00.000Z",
+      "connector": {
+        "id": "68e2a6d6470d750ea13bf728",
+        "type": "google_calendar",
+        "name": "Google Calendar",
+        "description": "Integrate with Google Calendar",
+        "category": "calendar"
+      }
+    }
+  }
+}
+
+Error Response (if connector already exists):
+{
+  "success": false,
+  "message": "Connector already added to this subaccount",
+  "code": "CONNECTOR_ALREADY_EXISTS"
+}
+
+
+========================================
+3. GET ALL CONNECTORS FOR A SUBACCOUNT
+========================================
+
+Get all connectors associated with a specific subaccount.
+
+curl --location 'http://localhost:3002/api/connectors/67123abc456def789012345' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN'
+
+Response:
+{
+  "success": true,
+  "message": "Connectors retrieved successfully",
+  "data": {
+    "connectors": [
+      {
+        "_id": "671abc123def456789012346",
+        "subaccountId": "67123abc456def789012345",
+        "connectorId": "68e2a6d6470d750ea13bf728",
+        "connectorType": "google_calendar",
+        "config": {
+          "email": "user@example.com",
+          "refreshToken": "encrypted_token",
+          "calendarIds": ["primary"]
+        },
+        "isActive": true,
+        "createdAt": "2025-10-05T18:00:00.000Z",
+        "updatedAt": "2025-10-05T18:00:00.000Z",
+        "connector": {
+          "id": "68e2a6d6470d750ea13bf728",
+          "type": "google_calendar",
+          "name": "Google Calendar",
+          "description": "Integrate with Google Calendar",
+          "category": "calendar"
+        }
+      }
+    ],
+    "total": 1
+  },
+  "cached": false
+}
+
+
+========================================
+4. GET SPECIFIC CONNECTOR FOR SUBACCOUNT
+========================================
+
+Get details of a specific connector for a subaccount.
+
+curl --location 'http://localhost:3002/api/connectors/67123abc456def789012345/68e2a6d6470d750ea13bf728' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN'
+
+Response:
+{
+  "success": true,
+  "message": "Connector retrieved successfully",
+  "data": {
+    "connector": {
+      "_id": "671abc123def456789012346",
+      "subaccountId": "67123abc456def789012345",
+      "connectorId": "68e2a6d6470d750ea13bf728",
+      "connectorType": "google_calendar",
+      "config": {
+        "email": "user@example.com",
+        "refreshToken": "encrypted_token",
+        "calendarIds": ["primary"]
+      },
+      "isActive": true,
+      "createdAt": "2025-10-05T18:00:00.000Z",
+      "updatedAt": "2025-10-05T18:00:00.000Z",
+      "connector": {
+        "id": "68e2a6d6470d750ea13bf728",
+        "type": "google_calendar",
+        "name": "Google Calendar",
+        "description": "Integrate with Google Calendar"
+      }
+    }
+  },
+  "cached": false
+}
+
+
+========================================
+5. UPDATE CONNECTOR CONFIGURATION
+========================================
+
+Update the configuration for a specific connector-subaccount relationship.
+
+curl --location --request PUT 'http://localhost:3002/api/connectors/67123abc456def789012345/68e2a6d6470d750ea13bf728' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{
+  "config": {
+    "email": "newemail@example.com",
+    "refreshToken": "new_encrypted_token",
+    "calendarIds": ["primary", "secondary"]
+  },
+  "isActive": true
+}'
+
+Response:
+{
+  "success": true,
+  "message": "Connector configuration updated successfully",
+  "data": {
+    "connector": {
+      "_id": "671abc123def456789012346",
+      "subaccountId": "67123abc456def789012345",
+      "connectorId": "68e2a6d6470d750ea13bf728",
+      "connectorType": "google_calendar",
+      "config": {
+        "email": "newemail@example.com",
+        "refreshToken": "new_encrypted_token",
+        "calendarIds": ["primary", "secondary"]
+      },
+      "isActive": true,
+      "createdAt": "2025-10-05T18:00:00.000Z",
+      "updatedAt": "2025-10-05T18:30:00.000Z",
+      "connector": {
+        "id": "68e2a6d6470d750ea13bf728",
+        "type": "google_calendar",
+        "name": "Google Calendar"
+      }
+    }
+  }
+}
+
+Note: Cache is automatically invalidated when configuration is updated.
+
+
+========================================
+6. DELETE CONNECTOR FROM SUBACCOUNT
+========================================
+
+Remove a connector from a specific subaccount.
+
+curl --location --request DELETE 'http://localhost:3002/api/connectors/67123abc456def789012345/68e2a6d6470d750ea13bf728' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN'
+
+Response:
+{
+  "success": true,
+  "message": "Connector deleted successfully",
+  "data": {
+    "deletedConnectorId": "68e2a6d6470d750ea13bf728"
+  }
+}
+
+Note: Cache is automatically invalidated when connector is deleted.
+
+
+========================================
+CACHE INVALIDATION ENDPOINTS
+========================================
+
+These endpoints are for service-to-service communication to invalidate cache
+when connectors are updated from the tenant-manager server or other services.
+
+All cache endpoints require service token authentication using X-Service-Token header.
+
+
+7. INVALIDATE CONNECTOR LIST CACHE
+-------------------------------------
+
+Called when the list of available connectors changes (new connector added, deleted, etc.)
+
+curl --location --request DELETE 'http://localhost:3002/api/cache/connectors/list' \
+--header 'X-Service-Token: YOUR_SERVICE_TOKEN' \
+--header 'X-Service-Name: tenant-manager'
+
+Response:
+{
+  "success": true,
+  "message": "Connector list cache invalidated successfully"
+}
+
+
+8. INVALIDATE SPECIFIC CONNECTOR CACHE
+----------------------------------------
+
+Called when a specific connector's details are updated.
+
+curl --location --request DELETE 'http://localhost:3002/api/cache/connectors/68e2a6d6470d750ea13bf728' \
+--header 'X-Service-Token: YOUR_SERVICE_TOKEN' \
+--header 'X-Service-Name: tenant-manager'
+
+Response:
+{
+  "success": true,
+  "message": "Connector cache invalidated successfully"
+}
+
+
+9. INVALIDATE SUBACCOUNT CONNECTORS CACHE
+-------------------------------------------
+
+Called when any connector is added/removed from a subaccount.
+
+curl --location --request DELETE 'http://localhost:3002/api/cache/connectors/subaccount/67123abc456def789012345' \
+--header 'X-Service-Token: YOUR_SERVICE_TOKEN' \
+--header 'X-Service-Name: tenant-manager'
+
+Response:
+{
+  "success": true,
+  "message": "Subaccount connectors cache invalidated successfully"
+}
+
+
+10. INVALIDATE SPECIFIC SUBACCOUNT CONNECTOR CONFIG
+-----------------------------------------------------
+
+Called when a specific connector's config for a subaccount is updated externally.
+
+curl --location --request DELETE 'http://localhost:3002/api/cache/connectors/subaccount/67123abc456def789012345/68e2a6d6470d750ea13bf728' \
+--header 'X-Service-Token: YOUR_SERVICE_TOKEN' \
+--header 'X-Service-Name: tenant-manager'
+
+Response:
+{
+  "success": true,
+  "message": "Subaccount connector config cache invalidated successfully"
+}
+
+
+========================================
+DATABASE COLLECTION STRUCTURE
+========================================
+
+Collection Name: connectorsubaccount
+
+Document Schema:
+{
+  "_id": ObjectId,
+  "subaccountId": String (24 hex chars),
+  "connectorId": String (24 hex chars),
+  "connectorType": String (e.g., "google_calendar"),
+  "config": Object {
+    // Connector-specific configuration
+    // e.g., for Google Calendar:
+    "email": String,
+    "refreshToken": String,
+    "calendarIds": Array
+  },
+  "isActive": Boolean,
+  "createdAt": Date,
+  "updatedAt": Date
+}
+
+Indexes:
+- { "subaccountId": 1 } - For listing connectors by subaccount
+- { "subaccountId": 1, "connectorId": 1 } - Unique compound index
+
+
+========================================
+CACHE STRATEGY
+========================================
+
+1. Available Connectors List
+   - Cache Key: "connectors:list"
+   - TTL: 1 hour (3600 seconds)
+   - Invalidated: When connectors are added/updated/deleted in tenant-manager
+
+2. Individual Connector Details
+   - Cache Key: "connector:{connectorId}"
+   - TTL: 1 hour (3600 seconds)
+   - Invalidated: When specific connector is updated
+
+3. Subaccount Connectors List
+   - Cache Key: "subaccount:{subaccountId}:connectors"
+   - TTL: 30 minutes (1800 seconds)
+   - Invalidated: When connector is added/removed from subaccount or config updated
+
+4. Subaccount-Connector Config
+   - Cache Key: "subaccount:{subaccountId}:connector:{connectorId}"
+   - TTL: 30 minutes (1800 seconds)
+   - Invalidated: When connector config is updated for subaccount
+
+
+========================================
+CACHE INVALIDATION FROM OTHER SERVERS
+========================================
+
+When to Invalidate Cache:
+
+1. From Tenant-Manager Server:
+   
+   When a connector is created/updated/deleted:
+   - Call: DELETE /api/cache/connectors/list
+   - Call: DELETE /api/cache/connectors/{connectorId}
+
+2. From Webhook Server (or any service that updates connector configs):
+   
+   When a connector config for a subaccount is updated:
+   - Call: DELETE /api/cache/connectors/subaccount/{subaccountId}/{connectorId}
+   - Call: DELETE /api/cache/connectors/subaccount/{subaccountId}
+
+3. Implementation Example (from another service):
+
+const axios = require('axios');
+
+async function invalidateConnectorCache(type, subaccountId, connectorId) {
+  const baseUrl = 'http://localhost:3002';
+  const serviceToken = process.env.DATABASE_SERVER_SERVICE_TOKEN;
+  
+  let url;
+  switch(type) {
+    case 'connector_list':
+      url = `${baseUrl}/api/cache/connectors/list`;
+      break;
+    case 'connector':
+      url = `${baseUrl}/api/cache/connectors/${connectorId}`;
+      break;
+    case 'subaccount_connectors':
+      url = `${baseUrl}/api/cache/connectors/subaccount/${subaccountId}`;
+      break;
+    case 'subaccount_connector_config':
+      url = `${baseUrl}/api/cache/connectors/subaccount/${subaccountId}/${connectorId}`;
+      break;
+  }
+  
+  try {
+    await axios.delete(url, {
+      headers: {
+        'X-Service-Token': serviceToken,
+        'X-Service-Name': 'tenant-manager'
+      }
+    });
+    console.log(`Cache invalidated: ${type}`);
+  } catch (error) {
+    console.error(`Failed to invalidate cache: ${error.message}`);
+  }
+}
+
+
+========================================
+ENVIRONMENT VARIABLES NEEDED
+========================================
+
+Add to .env file:
+
+# Service token for authentication
+DATABASE_SERVER_SERVICE_TOKEN=your_service_token_here
+
+# Tenant manager URL (already exists)
+TENANT_MANAGER_URL=http://localhost:3003
+
+# For cache webhook (if using webhook-based invalidation)
+CACHE_WEBHOOK_SECRET=your_webhook_secret_here
+
+
+========================================
+FEATURES IMPLEMENTED
+========================================
+
+✅ Get list of available connectors from tenant-manager
+✅ Add connector to a subaccount with custom config
+✅ Get all connectors for a subaccount
+✅ Get specific connector details for a subaccount
+✅ Update connector configuration for a subaccount
+✅ Delete connector from a subaccount
+✅ Redis caching for all connector operations
+✅ Automatic cache invalidation on updates
+✅ Service-to-service cache invalidation endpoints
+✅ Validation for all inputs
+✅ Error handling and logging
+✅ RBAC permission checks
+✅ Rate limiting
+✅ Support for multiple connectors per subaccount
+✅ Collection: connectorsubaccount for storing relationships
+
+
+========================================
+TESTING WORKFLOW
+========================================
+
+1. Get available connectors:
+   curl --location 'http://localhost:3002/api/connectors/available' \
+   --header 'Authorization: Bearer YOUR_JWT_TOKEN'
+
+2. Add Google Calendar connector to your subaccount:
+   curl --location 'http://localhost:3002/api/connectors/YOUR_SUBACCOUNT_ID' \
+   --header 'Content-Type: application/json' \
+   --header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+   --data '{
+     "connectorId": "CONNECTOR_ID_FROM_STEP_1",
+     "config": {
+       "email": "test@example.com"
+     }
+   }'
+
+3. List all connectors for your subaccount:
+   curl --location 'http://localhost:3002/api/connectors/YOUR_SUBACCOUNT_ID' \
+   --header 'Authorization: Bearer YOUR_JWT_TOKEN'
+
+4. Update connector configuration:
+   curl --location --request PUT 'http://localhost:3002/api/connectors/YOUR_SUBACCOUNT_ID/CONNECTOR_ID' \
+   --header 'Content-Type: application/json' \
+   --header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+   --data '{
+     "config": {
+       "email": "updated@example.com",
+       "refreshToken": "new_token"
+     }
+   }'
+
+5. Delete connector:
+   curl --location --request DELETE 'http://localhost:3002/api/connectors/YOUR_SUBACCOUNT_ID/CONNECTOR_ID' \
+   --header 'Authorization: Bearer YOUR_JWT_TOKEN'
+

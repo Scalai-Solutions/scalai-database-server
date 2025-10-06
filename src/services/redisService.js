@@ -213,6 +213,89 @@ class RedisService {
     return await this.del(key);
   }
 
+  // Retell cache methods
+  async cacheRetellAccount(subaccountId, data, ttl = 3600) {
+    const key = `${config.redis.prefixes.retell}${subaccountId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedRetellAccount(subaccountId) {
+    const key = `${config.redis.prefixes.retell}${subaccountId}`;
+    return await this.get(key);
+  }
+
+  async invalidateRetellAccount(subaccountId) {
+    const key = `${config.redis.prefixes.retell}${subaccountId}`;
+    return await this.del(key);
+  }
+
+  // Agent statistics cache methods
+  async cacheAgentStats(subaccountId, agentId, data, ttl = 300) {
+    // Cache for 5 minutes by default as stats change frequently
+    const key = `agent:stats:${subaccountId}:${agentId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedAgentStats(subaccountId, agentId) {
+    const key = `agent:stats:${subaccountId}:${agentId}`;
+    return await this.get(key);
+  }
+
+  async invalidateAgentStats(subaccountId, agentId) {
+    const key = `agent:stats:${subaccountId}:${agentId}`;
+    return await this.del(key);
+  }
+
+  // Agent details (configuration) cache methods
+  async cacheAgentDetails(subaccountId, agentId, data, ttl = 3600) {
+    // Cache for 1 hour as configuration changes less frequently
+    const key = `agent:details:${subaccountId}:${agentId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedAgentDetails(subaccountId, agentId) {
+    const key = `agent:details:${subaccountId}:${agentId}`;
+    return await this.get(key);
+  }
+
+  async invalidateAgentDetails(subaccountId, agentId) {
+    const key = `agent:details:${subaccountId}:${agentId}`;
+    return await this.del(key);
+  }
+
+  // Chat cache methods
+  async cacheChat(subaccountId, chatId, data, ttl = 300) {
+    // Cache for 5 minutes by default as chats are dynamic
+    const key = `chat:${subaccountId}:${chatId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedChat(subaccountId, chatId) {
+    const key = `chat:${subaccountId}:${chatId}`;
+    return await this.get(key);
+  }
+
+  async invalidateChat(subaccountId, chatId) {
+    const key = `chat:${subaccountId}:${chatId}`;
+    return await this.del(key);
+  }
+
+  async cacheChatList(subaccountId, data, ttl = 60) {
+    // Cache for 1 minute as list changes frequently
+    const key = `chat:list:${subaccountId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedChatList(subaccountId) {
+    const key = `chat:list:${subaccountId}`;
+    return await this.get(key);
+  }
+
+  async invalidateChatList(subaccountId) {
+    const key = `chat:list:${subaccountId}`;
+    return await this.del(key);
+  }
+
   // Health check
   async ping() {
     if (!this.isConnected) {
@@ -229,4 +312,6 @@ class RedisService {
   }
 }
 
-module.exports = RedisService;
+// Create and export singleton instance
+const redisService = new RedisService();
+module.exports = redisService;
