@@ -93,6 +93,49 @@ curl -X GET "https://your-server.com/api/ai-insights/sub_abc123?force=true" \
         "No connector activity in the last 2 days - potential integration issues"
       ]
     },
+    "charts": [
+      {
+        "type": "pie",
+        "title": "Activity Distribution by Category",
+        "description": "Breakdown of activities across different categories",
+        "width": 50,
+        "data": {
+          "labels": ["agent", "call", "chat", "connector"],
+          "values": [45, 67, 32, 8],
+          "colors": ["#3B82F6", "#10B981", "#F59E0B", "#EF4444"]
+        }
+      },
+      {
+        "type": "bar",
+        "title": "Activity Count by Category",
+        "description": "Comparison of activity volumes across categories",
+        "width": 100,
+        "data": {
+          "labels": ["agent", "call", "chat", "connector"],
+          "datasets": [{
+            "label": "Activity Count",
+            "values": [45, 67, 32, 8],
+            "backgroundColor": "#3B82F6"
+          }]
+        }
+      },
+      {
+        "type": "line",
+        "title": "Activity Timeline (Last 7 Days)",
+        "description": "Daily activity trend over the past week",
+        "width": 100,
+        "data": {
+          "labels": ["2024-01-08", "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12", "2024-01-13", "2024-01-14"],
+          "datasets": [{
+            "label": "Total Activities",
+            "values": [12, 18, 25, 30, 22, 28, 21],
+            "borderColor": "#3B82F6",
+            "backgroundColor": "rgba(59, 130, 246, 0.1)",
+            "fill": true
+          }]
+        }
+      }
+    ],
     "activitiesAnalyzed": 156,
     "timeRange": {
       "start": "2024-01-08T12:00:00.000Z",
@@ -187,6 +230,51 @@ Each insight contains:
   alerts: string[];             // Concerning patterns or anomalies (if any)
 }
 ```
+
+## Charts Data
+
+Each insight response includes a `charts` array with multiple ready-to-use chart configurations. Each chart contains:
+
+```typescript
+{
+  type: string;         // Chart type: 'pie', 'bar', 'horizontalBar', 'line', 'heatmap'
+  title: string;        // Display title for the chart
+  description: string;  // What the chart shows
+  width: number;        // Recommended width as percentage of container (50-100)
+  data: object;         // Chart data in standard format
+}
+```
+
+**Width Property:**
+- The chart container takes up **50% of the screen width**
+- The `width` value is a percentage **relative to that container**
+- Example: `width: 50` = 50% of container = 25% of screen width
+- Example: `width: 100` = 100% of container = 50% of screen width
+
+**Chart Types:**
+1. **Pie Chart** (`width: 50`) - Activity distribution by category
+2. **Bar Chart** (`width: 100`) - Activity count by category
+3. **Horizontal Bar** (`width: 100`) - Top 10 activity types
+4. **Line Chart** (`width: 100`) - Activity timeline (7 days)
+5. **Multi-line Chart** (`width: 100`) - Activity trends by category
+6. **Heatmap** (`width: 100`) - Activity by day and hour
+
+**Example Chart Object:**
+```json
+{
+  "type": "pie",
+  "title": "Activity Distribution by Category",
+  "description": "Breakdown of activities across different categories",
+  "width": 50,
+  "data": {
+    "labels": ["agent", "call", "chat", "connector"],
+    "values": [45, 67, 32, 8],
+    "colors": ["#3B82F6", "#10B981", "#F59E0B", "#EF4444"]
+  }
+}
+```
+
+For detailed chart formats and implementation examples, see [CHART_DATA_FORMAT.md](./CHART_DATA_FORMAT.md).
 
 ## Caching Behavior
 

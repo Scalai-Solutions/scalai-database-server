@@ -6,6 +6,7 @@ const DatabaseController = require('../controllers/databaseController');
 
 // Import middleware
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
+const { authenticateTokenOrService } = require('../middleware/serviceAuthMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
 
@@ -18,8 +19,21 @@ const {
   validateActivateChatAgentBody
 } = require('../validators/databaseValidator');
 
-// Apply common middleware
+// Apply common middleware to request logging only (auth is per-route)
 router.use(requestLogger);
+
+// Routes that support service authentication (defined before global auth middleware)
+// GET /api/database/:subaccountId/agents/:agentId/email-template - Get agent email template (supports service auth)
+router.get('/:subaccountId/agents/:agentId/email-template',
+  authenticateTokenOrService,
+  validateSubaccountId,
+  validateAgentId,
+  userLimiter,
+  subaccountLimiter(200, 60000),
+  DatabaseController.getAgentEmailTemplate
+);
+
+// Apply JWT authentication and rate limiting to all other routes
 router.use(authenticateToken);
 router.use(userLimiter);
 
@@ -36,7 +50,7 @@ router.post('/:subaccountId/agents',
 router.get('/:subaccountId/agents',
   validateSubaccountId,
   requireResourcePermission(),
-  subaccountLimiter(200, 60000),
+  subaccountLimiter(2000, 60000),
   DatabaseController.getAgents
 );
 
@@ -47,6 +61,33 @@ router.get('/:subaccountId/agents/:agentId',
   requireResourcePermission(),
   subaccountLimiter(100, 60000),
   DatabaseController.getAgentDetails
+);
+
+// GET /api/database/:subaccountId/agents/:agentId/stats-with-cost - Get agent details with cost and duration statistics
+router.get('/:subaccountId/agents/:agentId/analytics-stats',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.getAgentDetailsWithCost
+);
+
+// GET /api/database/:subaccountId/agents/:agentId/costs-breakdown - Get detailed cost breakdown for all calls
+router.get('/:subaccountId/agents/:agentId/costs-breakdown',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.getAgentCallCostsBreakdown
+);
+
+// GET /api/database/:subaccountId/agents/:agentId/call-analytics - Get call analytics (success/failure, peak hours, outcome distribution)
+router.get('/:subaccountId/agents/:agentId/call-analytics',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.getAgentCallAnalytics
 );
 
 // DELETE /api/database/:subaccountId/agents/:agentId - Delete agent
@@ -75,6 +116,15 @@ router.get('/:subaccountId/agents/:agentId/details',
   requireResourcePermission(),
   subaccountLimiter(200, 60000),
   DatabaseController.getAgentDetailsConfig
+);
+
+// PATCH /api/database/:subaccountId/agents/:agentId/email-template - Update agent email template (user auth only)
+router.patch('/:subaccountId/agents/:agentId/email-template',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.updateAgentEmailTemplate
 );
 
 // ========== CHAT AGENTS ROUTES ==========
@@ -113,6 +163,15 @@ router.get('/:subaccountId/chat-agents/:agentId',
   requireResourcePermission(),
   subaccountLimiter(100, 60000),
   DatabaseController.getChatAgentDetails
+);
+
+// DELETE /api/database/:subaccountId/chat-agents/:agentId - Delete chat agent
+router.delete('/:subaccountId/chat-agents/:agentId',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  DatabaseController.deleteChatAgent
 );
 
 // PATCH /api/database/:subaccountId/chat-agents/:agentId/details - Update chat agent details (begin message, prompt, voice, etc.)

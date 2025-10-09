@@ -143,6 +143,7 @@ class HomeController {
   static async fetchPeriodMetrics(connection, subaccountId, startDate, endDate, operationId) {
     const callsCollection = connection.db.collection('calls');
     const agentsCollection = connection.db.collection('agents');
+    const meetingsCollection = connection.db.collection('meetings');
 
     // 1. Total calls in period
     const totalCalls = await callsCollection.countDocuments({
@@ -153,14 +154,13 @@ class HomeController {
       }
     });
 
-    // 2. Meetings booked (calls where appointment_booked is true in call_analysis)
-    const meetingsBooked = await callsCollection.countDocuments({
+    // 2. Meetings booked (from meetings collection)
+    const meetingsBooked = await meetingsCollection.countDocuments({
       subaccountId: subaccountId,
       createdAt: {
         $gte: startDate,
         $lte: endDate
-      },
-      'call_analysis.custom_analysis_data.appointment_booked': true
+      }
     });
 
     // 3. Unresponsive calls (calls where call_successful is false)
@@ -170,7 +170,16 @@ class HomeController {
         $gte: startDate,
         $lte: endDate
       },
-      'call_analysis.call_successful': false
+      $or: [
+        { disconnection_reason: { $exists: false } },
+        { disconnection_reason: { $eq: null } },
+        { disconnection_reason: { $eq: "" } },
+        { 
+          disconnection_reason: { 
+            $not: { $regex: "hangup", $options: "i" } 
+          }
+        }
+      ]
     });
 
     // 4. Total agents for the subaccount

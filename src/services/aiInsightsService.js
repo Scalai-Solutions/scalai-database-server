@@ -236,6 +236,7 @@ class AIInsightsService {
         type: 'pie',
         title: 'Activity Distribution by Category',
         description: 'Breakdown of activities across different categories',
+        width: 50, // 50% of container width (compact for pie chart)
         data: {
           labels: stats.byCategory.map(cat => cat._id),
           values: stats.byCategory.map(cat => cat.count),
@@ -248,6 +249,7 @@ class AIInsightsService {
         type: 'bar',
         title: 'Activity Count by Category',
         description: 'Comparison of activity volumes across categories',
+        width: 100, // 100% of container width (full width for comparison)
         data: {
           labels: stats.byCategory.map(cat => cat._id),
           datasets: [{
@@ -267,6 +269,7 @@ class AIInsightsService {
         type: 'horizontalBar',
         title: 'Top 10 Activity Types',
         description: 'Most common operations performed',
+        width: 100, // 100% of container width (full width for detailed list)
         data: {
           labels: topTypes.map(type => type._id.replace(/_/g, ' ')),
           datasets: [{
@@ -285,6 +288,7 @@ class AIInsightsService {
         type: 'line',
         title: 'Activity Timeline (Last 7 Days)',
         description: 'Daily activity trend over the past week',
+        width: 100, // 100% of container width (full width for timeline)
         data: {
           labels: timelineData.dates,
           datasets: [{
@@ -312,6 +316,7 @@ class AIInsightsService {
         type: 'line',
         title: 'Activity Trends by Category',
         description: 'Compare activity trends across different categories',
+        width: 100, // 100% of container width (full width for multi-line comparison)
         data: {
           labels: categoryTimeline[Object.keys(categoryTimeline)[0]].dates,
           datasets: datasets
@@ -326,6 +331,7 @@ class AIInsightsService {
         type: 'heatmap',
         title: 'Activity Heatmap (Day vs Hour)',
         description: 'When activities occur throughout the week',
+        width: 100, // 100% of container width (full width for 24-hour grid)
         data: heatmapData
       });
     }

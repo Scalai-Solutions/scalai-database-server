@@ -54,6 +54,9 @@ class DatabaseController {
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
       const { connection } = connectionInfo;
 
+      // Get deployed webhook URL from config
+      const deployedWebhookUrl = config.retell.deployedWebhookServerUrl || config.webhookServer.deployedUrl || 'https://scalai-b-48660c785242.herokuapp.com';
+
       // Step 1: Create LLM
       Logger.info('Creating LLM for agent', { operationId, subaccountId, name });
       
@@ -118,9 +121,8 @@ TRANSITIONS
 
 You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
 
-Check availability for a slot using check_availablity function.
+Check availability for a slot using check_availability function.
 Specifications for check_availability function
-#  Use {{agent_id}} as agent_id in payload
 # send payload time in Europe/Madrid timezone
 
 
@@ -130,31 +132,27 @@ ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
               {
                 type: "custom",
                 name: "check_availability",
-                url: "https://scalai-b-48660c785242.herokuapp.com/api/webhooks/check-availability",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/check-availability",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Check the availability of the appointment",
+                description: "Check if a specific time slot is available for booking an appointment",
                 parameters: {
                   type: "object",
                   properties: {
-                    agent_id: {
-                      type: "integer",
-                      description: "The agent id for which the availability is to be checked."
-                    },
                     date: {
                       type: "string",
-                      description: "The date of the appointment in yyyy-mm-dd format"
+                      description: "Date in YYYY-MM-DD format"
                     },
-                    start_time: {
+                    startTime: {
                       type: "string",
-                      description: "The start time of the appointment in hh:mm format 24 hour format"
+                      description: "Start time in HH:mm format (24-hour)"
                     },
-                    end_time: {
+                    endTime: {
                       type: "string",
-                      description: "The end time of the appointment in hh:mm format 24 hour format"
+                      description: "End time in HH:mm format (24-hour)"
                     }
                   },
-                  required: ["agent_id", "date", "start_time", "end_time"]
+                  required: ["date", "startTime", "endTime"]
                 },
                 execution_message_description: "Checking availability for the appointment",
                 timeout_ms: 120000
@@ -163,92 +161,46 @@ ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
             edges: [
               {
                 destination_state_name: "book_appointment_state",
-                description: "If the slot checked is available and user agrees to proceed further on booking meet.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "The date at which meeting is to be booked in yyyy-mm-dd format"
-                    },
-                    end_time: {
-                      type: "string",
-                      description: "The end time of meeting in hh:mm format."
-                    },
-                    start_time: {
-                      type: "string",
-                      description: "The start time of meeting in hh:mm format."
-                    },
-                    timezone: {
-                      type: "string",
-                      description: "The timezone to book meeting in +hh:mm / -hh:mm format"
-                    }
-                  },
-                  required: ["date", "start_time", "end_time", "timezone"]
-                }
+                description: "If the slot checked is available and user agrees to proceed further on booking meet."
               }
             ]
           },
           {
             name: "nearest_slots_state",
             description: "State for finding nearest available slots",
-            state_prompt: `Do not ask to proceed before calling nearest_available_slots function. Do it whenever required
+            state_prompt: `You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
 
-You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
+Use nearest_available_slots function to find available slots. It responds with available slots in 30 days range from start date.
+So if no slots found in 30 days range, extend startDate by 30 days unless you find a slot.
 
-Do not suggest slots like a list if multiple slots are fetched, instead keep your tone like a normal conversation and suggetion.
-ALWAYS, After getting response back from nearest_available_slots custom function, filter out the slot options those are already suggested in earlier nearest_available_slots custom function:calls.
-For example, if a slot is suggested and user asks for more options, then the previously suggested slot is also returned in response, so you should not repeat and suggest it again. ALWAYS MAKEIT SURE.
+After user agrees to book appointment for a slot, then only transition to book_appointment_state, otherwise do not.
 
-If same slots are returned, find more slots by increasing value of n. Do this until atleast one new slot is got.
-
-# If no from_date and to_date are mentioned, do not ask it. Consider from_date be today and to_date be null. 
-# If from_date and to_date is mentioned, use them in payload. Do not use whichever is not mentioned.
-# Do not assume any date on your own. (Only consider today's date as from_date if from_date is not mentioned)
-
-
-Specifications about, nearest_available_slots custom function:
-# Use {{agent_id}} as agent_id in payload
-# Use nearest_available_slots function to get n number of available slots.
-Unless mentioned, number of slots to fetch be 1 by default. If asked by user for more options then increase n value to get more available slots.
-# default duration in minutes is 30.
-# send payload time in Europe/Madrid timezone
-
-
-ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
+DO NOT MENTION FUNCTION nearest_available_slots NAME ANYTIME DURING THE CONVERSATION`,
             tools: [
               {
                 type: "custom",
                 name: "nearest_available_slots",
-                url: "https://scalai-b-48660c785242.herokuapp.com/api/webhooks/nearest-available-slots",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Get the nearest available time slots for an appointment",
+                description: "Find the nearest available appointment slots",
                 parameters: {
                   type: "object",
                   properties: {
-                    agent_id: {
-                      type: "integer",
-                      description: "The agent id for which to find available slots"
-                    },
-                    n: {
-                      type: "integer",
-                      description: "Number of nearest available slots to find"
-                    },
-                    from_datetime: {
+                    startDate: {
                       type: "string",
-                      description: "Start datetime to search from in ISO format (YYYY-MM-DDTHH:mm:ssZ). Default from_time is current date and time."
+                      description: "Starting date to search from (YYYY-MM-DD)"
                     },
-                    to_datetime: {
-                      type: "string",
-                      description: "End datetime to search until in ISO format (YYYY-MM-DDTHH:mm:ssZ)"
+                    count: {
+                      type: "number",
+                      description: "Number of available slots to return (default: 5)"
                     },
-                    duration_minutes: {
-                      type: "integer",
-                      description: "Duration of the appointment in minutes"
+                    durationMinutes: {
+                      type: "number",
+                      description: "Duration of each slot in minutes (default: 60)"
                     }
                   },
-                  required: ["agent_id", "n", "duration_minutes", "from_datetime"]
+                  required: ["startDate"]
                 },
                 execution_message_description: "Finding nearest available time slots",
                 timeout_ms: 120000
@@ -257,42 +209,20 @@ ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
             edges: [
               {
                 destination_state_name: "book_appointment_state",
-                description: "If user selects a slot to book meeting or agrees to proceed further on booking meet.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "The date at which meeting is to be booked in yyyy-mm-dd format"
-                    },
-                    end_time: {
-                      type: "string",
-                      description: "The end time of meeting in hh:mm format."
-                    },
-                    start_time: {
-                      type: "string",
-                      description: "The start time of meeting in hh:mm format."
-                    },
-                    timezone: {
-                      type: "string",
-                      description: "The timezone to book meeting in +hh:mm / -hh:mm format"
-                    }
-                  },
-                  required: ["date", "start_time", "end_time", "timezone"]
-                }
+                description: "If user selects a slot to book meeting or agrees to proceed further on booking meet."
               }
             ]
           },
           {
             name: "book_appointment_state",
             description: "State for booking appointments",
-            state_prompt: `Do not ask to proceed before calling book_appointment function. Do it whenever required without waiting for instruction.
+            state_prompt: `You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
 
 Remember, if entered this state, book_appointment function has to be called at completion. 
 
-Specifications for book_appointment function
-#  Use {{agent_id}} as agent_id in payload
-# Use timezone passed from earlier state. It is also in +hh:mm or -hh:mm format
+- Collect name of user. Ask to spell it to understand properly. Repeat it letter by letter to confirm. be fluent like A....S....H....O....K for ashok. Speak like a normal conversation, no dashes and all
+- Collect email of user. Ask to spell it to understand properly. Repeat it letter by letter to confirm. Repeat it letter by letter to confirm. be fluent like A....S....H....O....K for ashok. Speak like a normal conversation, no dashes and all
+- Collect phone number. Repeat it digit by digit to confirm. 
 
 After appointment is booked:
 ## set appointment_booked variable to be true.
@@ -302,48 +232,51 @@ After appointment is booked:
               {
                 type: "custom",
                 name: "book_appointment",
-                url: "https://scalai-b-48660c785242.herokuapp.com/api/webhooks/book-appointment",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/book-appointment",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Book an appointment with the specified details",
+                description: "Book an appointment at a specific time slot",
                 parameters: {
                   type: "object",
                   properties: {
-                    agent_id: {
-                      type: "integer",
-                      description: "The agent id for which to book the appointment"
-                    },
                     date: {
                       type: "string",
-                      description: "The date of the appointment in yyyy-mm-dd format"
+                      description: "Appointment date (YYYY-MM-DD)"
                     },
-                    start_time: {
+                    startTime: {
                       type: "string",
-                      description: "The start time of the appointment in hh:mm format 24 hour format"
+                      description: "Start time (HH:mm, 24-hour format)"
                     },
-                    end_time: {
+                    endTime: {
                       type: "string",
-                      description: "The end time of the appointment in hh:mm format 24 hour format"
+                      description: "End time (HH:mm, 24-hour format)"
                     },
-                    name: {
+                    title: {
                       type: "string",
-                      description: "Name of the person booking the appointment"
+                      description: "Meeting title"
                     },
-                    phone: {
+                    description: {
                       type: "string",
-                      description: "Phone number of the person booking the appointment. It must be 10 digit number without any other character. Just 10 digit number"
+                      description: "Meeting description"
                     },
-                    email: {
+                    customerName: {
                       type: "string",
-                      description: "Email address of the person booking the appointment"
+                      description: "Customer's name"
                     },
-                    timezone: {
+                    customerEmail: {
                       type: "string",
-                      description: "Timezone of the person booking the appointment in format like +hh:mm or -hh:mm",
-                      examples: ["+05:30", "-02:30", "+00:00"]
+                      description: "Customer's email address"
+                    },
+                    customerPhone: {
+                      type: "string",
+                      description: "Customer's phone number"
+                    },
+                    notes: {
+                      type: "string",
+                      description: "Additional notes"
                     }
                   },
-                  required: ["agent_id", "date", "start_time", "end_time", "name", "phone", "email", "timezone"]
+                  required: ["date", "startTime", "endTime", "title"]
                 },
                 execution_message_description: "Booking the appointment",
                 timeout_ms: 120000
@@ -451,8 +384,6 @@ After appointment is booked:
       });
 
       // Step 2.5: Update agent with webhook URL (now that we have agentId) and tool URLs
-      const deployedWebhookUrl = config.retell.deployedWebhookServerUrl || config.webhookServer.deployedUrl;
-      
       if (deployedWebhookUrl) {
         const webhookUrlWithAgent = `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/retell`;
         
@@ -490,7 +421,7 @@ After appointment is booked:
                   url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/check-availability`,
                   speak_during_execution: false,
                   speak_after_execution: true,
-                  description: "Check the availability of the appointment",
+                  description: "Check if a specific time slot is available for booking an appointment",
                   parameters: llmConfig.states[1].tools[0].parameters,
                   execution_message_description: "Checking availability for the appointment",
                   timeout_ms: 120000
@@ -528,7 +459,7 @@ After appointment is booked:
                   url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/book-appointment`,
                   speak_during_execution: false,
                   speak_after_execution: true,
-                  description: "Book an appointment with the specified details",
+                  description: "Book an appointment at a specific time slot",
                   parameters: llmConfig.states[3].tools[0].parameters,
                   execution_message_description: "Booking the appointment",
                   timeout_ms: 120000
@@ -593,6 +524,7 @@ After appointment is booked:
         voiceModel: agentResponse.voice_model,
         language: agentResponse.language,
         webhookUrl: agentResponse.webhook_url,
+        emailTemplate: null, // Email template for post-call summaries
         createdAt: new Date(),
         createdBy: userId,
         subaccountId: subaccountId,
@@ -1179,10 +1111,26 @@ After appointment is booked:
             },
             // Identify unresponsive calls
             isUnresponsive: {
-              $or: [
-                { $eq: [{ $ifNull: ['$user_sentiment', null] }, null] },
-                { $eq: ['$disconnection_reason', 'user_hangup'] }
-              ]
+              $cond: {
+                if: {
+                  $or: [
+                    { $eq: [{ $type: '$disconnection_reason' }, 'missing'] },
+                    { $eq: ['$disconnection_reason', null] },
+                    { $eq: ['$disconnection_reason', ''] },
+                    {
+                      $not: {
+                        $regexMatch: { 
+                          input: { $toString: '$disconnection_reason' }, 
+                          regex: 'hangup',
+                          options: 'i'
+                        }
+                      }
+                    }
+                  ]
+                },
+                then: true,
+                else: false
+              }
             },
             // Only include valid success scores
             validSuccessScore: {
@@ -1275,40 +1223,59 @@ After appointment is booked:
       const meetingsAggregation = await meetingsCollection.aggregate([
         {
           $match: {
-            agent_id: agentId,
-            call_id: {
-              $in: [...currentStats.callIds, ...previousStats.callIds]
+            subaccountId: subaccountId,
+            createdAt: {
+              $gte: previousPeriodStart
             }
           }
         },
         {
-          $group: {
-            _id: null,
-            currentPeriodMeetings: {
-              $sum: {
-                $cond: [
-                  { $in: ['$call_id', currentStats.callIds] },
-                  1,
-                  0
-                ]
-              }
-            },
-            previousPeriodMeetings: {
-              $sum: {
-                $cond: [
-                  { $in: ['$call_id', previousStats.callIds] },
-                  1,
-                  0
-                ]
+          $addFields: {
+            period: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gte: ['$createdAt', currentPeriodStart] },
+                    { $lte: ['$createdAt', currentPeriodEnd] }
+                  ]
+                },
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$createdAt', previousPeriodStart] },
+                        { $lt: ['$createdAt', previousPeriodEnd] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
               }
             }
+          }
+        },
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$period',
+            count: { $sum: 1 }
           }
         }
       ]).toArray();
 
-      const meetingsCounts = meetingsAggregation[0] || {
-        currentPeriodMeetings: 0,
-        previousPeriodMeetings: 0
+      // Parse meetings aggregation results
+      const currentPeriodMeetings = meetingsAggregation.find(m => m._id === 'current')?.count || 0;
+      const previousPeriodMeetings = meetingsAggregation.find(m => m._id === 'previous')?.count || 0;
+      
+      const meetingsCounts = {
+        currentPeriodMeetings,
+        previousPeriodMeetings
       };
 
       // Step 4: Calculate percentage changes
@@ -1410,6 +1377,1250 @@ After appointment is booked:
 
     } catch (error) {
       const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getAgentDetails', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get agent details with cost and duration statistics
+  static async getAgentDetailsWithCost(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+
+      // Get date range from query params
+      const startDateParam = req.query.startDate;
+      const endDateParam = req.query.endDate;
+
+      // Default to last 30 days if not provided
+      const now = new Date();
+      let currentPeriodStart, currentPeriodEnd;
+
+      if (startDateParam && endDateParam) {
+        // Validate date format and parse
+        currentPeriodStart = new Date(startDateParam);
+        currentPeriodEnd = new Date(endDateParam);
+
+        // Validate dates
+        if (isNaN(currentPeriodStart.getTime()) || isNaN(currentPeriodEnd.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ)',
+            code: 'INVALID_DATE_FORMAT'
+          });
+        }
+
+        if (currentPeriodStart >= currentPeriodEnd) {
+          return res.status(400).json({
+            success: false,
+            message: 'startDate must be before endDate',
+            code: 'INVALID_DATE_RANGE'
+          });
+        }
+
+        // Check if date range is not too large (max 2 years)
+        const daysDiff = (currentPeriodEnd - currentPeriodStart) / (1000 * 60 * 60 * 24);
+        if (daysDiff > 730) {
+          return res.status(400).json({
+            success: false,
+            message: 'Date range cannot exceed 730 days (2 years)',
+            code: 'DATE_RANGE_TOO_LARGE'
+          });
+        }
+      } else {
+        // Default: last 30 days
+        currentPeriodEnd = now;
+        currentPeriodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+
+      // Calculate previous period (same duration as current period, immediately before it)
+      const periodDuration = currentPeriodEnd - currentPeriodStart;
+      const previousPeriodEnd = currentPeriodStart;
+      const previousPeriodStart = new Date(currentPeriodStart.getTime() - periodDuration);
+
+      Logger.info('Fetching agent details with cost', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        currentPeriodStart: currentPeriodStart.toISOString(),
+        currentPeriodEnd: currentPeriodEnd.toISOString(),
+        previousPeriodStart: previousPeriodStart.toISOString(),
+        previousPeriodEnd: previousPeriodEnd.toISOString()
+      });
+
+      // Check cache first (cache key includes date range and cost indicator)
+      const cacheKey = `${subaccountId}:${agentId}:cost:${currentPeriodStart.getTime()}:${currentPeriodEnd.getTime()}`;
+      try {
+        const cachedStats = await redisService.getCachedAgentStats(cacheKey, cacheKey);
+        if (cachedStats) {
+          Logger.debug('Using cached agent statistics with cost', { 
+            operationId, 
+            agentId,
+            currentPeriodStart: currentPeriodStart.toISOString(),
+            currentPeriodEnd: currentPeriodEnd.toISOString(),
+            cacheHit: true 
+          });
+          
+          return res.json({
+            success: true,
+            message: 'Agent details with cost retrieved successfully (cached)',
+            data: cachedStats,
+            meta: {
+              operationId,
+              duration: `${Date.now() - startTime}ms`,
+              cached: true
+            }
+          });
+        }
+      } catch (cacheError) {
+        Logger.warn('Cache retrieval failed, fetching from database', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get collections
+      const agentsCollection = connection.db.collection('agents');
+      const callsCollection = connection.db.collection('calls');
+      const meetingsCollection = connection.db.collection('meetings');
+
+      // Step 1: Find the agent
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      // Step 2: Use aggregation to calculate statistics for both periods (including cost and duration)
+      const statisticsAggregation = await callsCollection.aggregate([
+        // Match calls for this agent in both periods
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: previousPeriodStart.getTime()
+            }
+          }
+        },
+        // Add period classification
+        {
+          $addFields: {
+            period: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gte: ['$start_timestamp', currentPeriodStart.getTime()] },
+                    { $lte: ['$start_timestamp', currentPeriodEnd.getTime()] }
+                  ]
+                },
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$start_timestamp', previousPeriodStart.getTime()] },
+                        { $lt: ['$start_timestamp', previousPeriodEnd.getTime()] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
+              }
+            },
+            // Identify unresponsive calls
+            isUnresponsive: {
+              $cond: {
+                if: {
+                  $or: [
+                    { $eq: [{ $type: '$disconnection_reason' }, 'missing'] },
+                    { $eq: ['$disconnection_reason', null] },
+                    { $eq: ['$disconnection_reason', ''] },
+                    {
+                      $not: {
+                        $regexMatch: { 
+                          input: { $toString: '$disconnection_reason' }, 
+                          regex: 'hangup',
+                          options: 'i'
+                        }
+                      }
+                    }
+                  ]
+                },
+                then: true,
+                else: false
+              }
+            },
+            // Only include valid success scores
+            validSuccessScore: {
+              $cond: {
+                if: { $gt: [{ $ifNull: ['$success_score', 0] }, 0] },
+                then: '$success_score',
+                else: null
+              }
+            },
+            // Extract cost and duration
+            callCost: {
+              $divide: [{ $ifNull: ['$call_cost.combined_cost', 0] }, 100]
+            },
+            callDuration: {
+              $ifNull: ['$call_cost.total_duration_seconds', 0]
+            }
+          }
+        },
+        // Filter out excluded calls
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        // Group by period to calculate statistics
+        {
+          $group: {
+            _id: '$period',
+            totalCalls: { $sum: 1 },
+            unresponsiveCalls: {
+              $sum: { $cond: ['$isUnresponsive', 1, 0] }
+            },
+            successScores: {
+              $push: '$validSuccessScore'
+            },
+            totalCost: { $sum: '$callCost' },
+            totalDuration: { $sum: '$callDuration' },
+            callIds: { $push: '$call_id' }
+          }
+        },
+        // Calculate cumulative success rate and averages
+        {
+          $project: {
+            _id: 1,
+            totalCalls: 1,
+            unresponsiveCalls: 1,
+            callIds: 1,
+            totalCost: 1,
+            totalDuration: 1,
+            avgCostPerCall: {
+              $cond: {
+                if: { $gt: ['$totalCalls', 0] },
+                then: { $divide: ['$totalCost', '$totalCalls'] },
+                else: 0
+              }
+            },
+            avgCallDuration: {
+              $cond: {
+                if: { $gt: ['$totalCalls', 0] },
+                then: { $divide: ['$totalDuration', '$totalCalls'] },
+                else: 0
+              }
+            },
+            successScores: {
+              $filter: {
+                input: '$successScores',
+                as: 'score',
+                cond: { $ne: ['$$score', null] }
+              }
+            }
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            totalCalls: 1,
+            unresponsiveCalls: 1,
+            callIds: 1,
+            totalCost: 1,
+            totalDuration: 1,
+            avgCostPerCall: 1,
+            avgCallDuration: 1,
+            cumulativeSuccessRate: {
+              $cond: {
+                if: { $gt: [{ $size: '$successScores' }, 0] },
+                then: {
+                  $divide: [
+                    { $reduce: {
+                      input: '$successScores',
+                      initialValue: 0,
+                      in: { $add: ['$$value', '$$this'] }
+                    }},
+                    { $size: '$successScores' }
+                  ]
+                },
+                else: 0
+              }
+            }
+          }
+        }
+      ]).toArray();
+
+      // Parse aggregation results
+      const currentStats = statisticsAggregation.find(s => s._id === 'current') || {
+        totalCalls: 0,
+        unresponsiveCalls: 0,
+        cumulativeSuccessRate: 0,
+        avgCostPerCall: 0,
+        avgCallDuration: 0,
+        callIds: []
+      };
+
+      const previousStats = statisticsAggregation.find(s => s._id === 'previous') || {
+        totalCalls: 0,
+        unresponsiveCalls: 0,
+        cumulativeSuccessRate: 0,
+        avgCostPerCall: 0,
+        avgCallDuration: 0,
+        callIds: []
+      };
+
+      // Step 3: Get meetings count for both periods using aggregation
+      const meetingsAggregation = await meetingsCollection.aggregate([
+        {
+          $match: {
+            subaccountId: subaccountId,
+            createdAt: {
+              $gte: previousPeriodStart
+            }
+          }
+        },
+        {
+          $addFields: {
+            period: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gte: ['$createdAt', currentPeriodStart] },
+                    { $lte: ['$createdAt', currentPeriodEnd] }
+                  ]
+                },
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$createdAt', previousPeriodStart] },
+                        { $lt: ['$createdAt', previousPeriodEnd] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$period',
+            count: { $sum: 1 }
+          }
+        }
+      ]).toArray();
+
+      // Parse meetings aggregation results
+      const currentPeriodMeetings = meetingsAggregation.find(m => m._id === 'current')?.count || 0;
+      const previousPeriodMeetings = meetingsAggregation.find(m => m._id === 'previous')?.count || 0;
+      
+      const meetingsCounts = {
+        currentPeriodMeetings,
+        previousPeriodMeetings
+      };
+
+      // Step 4: Calculate percentage changes
+      const calculatePercentageChange = (current, previous) => {
+        if (previous === 0) {
+          return current > 0 ? 100 : 0;
+        }
+        return ((current - previous) / previous) * 100;
+      };
+
+      const statistics = {
+        agent: {
+          agentId: agentDocument.agentId,
+          name: agentDocument.name,
+          description: agentDocument.description,
+          voiceId: agentDocument.voiceId,
+          language: agentDocument.language,
+          createdAt: agentDocument.createdAt
+        },
+        currentPeriod: {
+          totalCalls: currentStats.totalCalls,
+          meetingsBooked: meetingsCounts.currentPeriodMeetings,
+          unresponsiveCalls: currentStats.unresponsiveCalls,
+          cumulativeSuccessRate: Math.round(currentStats.cumulativeSuccessRate * 100) / 100,
+          costPerCall: Math.round(currentStats.avgCostPerCall * 100) / 100,
+          avgCallDuration: Math.round(currentStats.avgCallDuration * 100) / 100,
+          periodStart: currentPeriodStart,
+          periodEnd: currentPeriodEnd
+        },
+        previousPeriod: {
+          totalCalls: previousStats.totalCalls,
+          meetingsBooked: meetingsCounts.previousPeriodMeetings,
+          unresponsiveCalls: previousStats.unresponsiveCalls,
+          cumulativeSuccessRate: Math.round(previousStats.cumulativeSuccessRate * 100) / 100,
+          costPerCall: Math.round(previousStats.avgCostPerCall * 100) / 100,
+          avgCallDuration: Math.round(previousStats.avgCallDuration * 100) / 100,
+          periodStart: previousPeriodStart,
+          periodEnd: previousPeriodEnd
+        },
+        comparison: {
+          totalCalls: {
+            change: currentStats.totalCalls - previousStats.totalCalls,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.totalCalls, previousStats.totalCalls) * 100
+            ) / 100
+          },
+          meetingsBooked: {
+            change: meetingsCounts.currentPeriodMeetings - meetingsCounts.previousPeriodMeetings,
+            percentageChange: Math.round(
+              calculatePercentageChange(meetingsCounts.currentPeriodMeetings, meetingsCounts.previousPeriodMeetings) * 100
+            ) / 100
+          },
+          unresponsiveCalls: {
+            change: currentStats.unresponsiveCalls - previousStats.unresponsiveCalls,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.unresponsiveCalls, previousStats.unresponsiveCalls) * 100
+            ) / 100
+          },
+          cumulativeSuccessRate: {
+            change: Math.round((currentStats.cumulativeSuccessRate - previousStats.cumulativeSuccessRate) * 100) / 100,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.cumulativeSuccessRate, previousStats.cumulativeSuccessRate) * 100
+            ) / 100
+          },
+          costPerCall: {
+            change: Math.round((currentStats.avgCostPerCall - previousStats.avgCostPerCall) * 100) / 100,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.avgCostPerCall, previousStats.avgCostPerCall) * 100
+            ) / 100
+          },
+          avgCallDuration: {
+            change: Math.round((currentStats.avgCallDuration - previousStats.avgCallDuration) * 100) / 100,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.avgCallDuration, previousStats.avgCallDuration) * 100
+            ) / 100
+          }
+        }
+      };
+
+      // Cache the results for 5 minutes
+      try {
+        await redisService.cacheAgentStats(cacheKey, cacheKey, statistics, 300);
+        Logger.debug('Agent statistics with cost cached', { 
+          operationId, 
+          agentId,
+          currentPeriodStart: currentPeriodStart.toISOString(),
+          currentPeriodEnd: currentPeriodEnd.toISOString()
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to cache agent statistics with cost', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Agent details with cost fetched successfully', {
+        operationId,
+        subaccountId,
+        agentId,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Agent details with cost retrieved successfully',
+        data: statistics,
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cached: false
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getAgentDetailsWithCost', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get agent call analytics (success/failure, peak hours, outcome distribution)
+  static async getAgentCallAnalytics(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+
+      // Get date range from query params
+      const startDateParam = req.query.startDate;
+      const endDateParam = req.query.endDate;
+      const groupBy = req.query.groupBy || 'day'; // day, week, month
+
+      // Default to last 30 days if not provided
+      const now = new Date();
+      let periodStart, periodEnd;
+
+      if (startDateParam && endDateParam) {
+        // Validate date format and parse
+        periodStart = new Date(startDateParam);
+        periodEnd = new Date(endDateParam);
+
+        // Validate dates
+        if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ)',
+            code: 'INVALID_DATE_FORMAT'
+          });
+        }
+
+        if (periodStart >= periodEnd) {
+          return res.status(400).json({
+            success: false,
+            message: 'startDate must be before endDate',
+            code: 'INVALID_DATE_RANGE'
+          });
+        }
+
+        // Check if date range is not too large (max 2 years)
+        const daysDiff = (periodEnd - periodStart) / (1000 * 60 * 60 * 24);
+        if (daysDiff > 730) {
+          return res.status(400).json({
+            success: false,
+            message: 'Date range cannot exceed 730 days (2 years)',
+            code: 'DATE_RANGE_TOO_LARGE'
+          });
+        }
+      } else {
+        // Default: last 30 days
+        periodEnd = now;
+        periodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+
+      Logger.info('Fetching agent call analytics', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+        groupBy
+      });
+
+      // Check cache first
+      const cacheKey = `${subaccountId}:${agentId}:analytics:${periodStart.getTime()}:${periodEnd.getTime()}:${groupBy}`;
+      try {
+        const cachedData = await redisService.getCachedAgentStats(cacheKey, cacheKey);
+        if (cachedData) {
+          Logger.debug('Using cached call analytics', { 
+            operationId, 
+            agentId,
+            periodStart: periodStart.toISOString(),
+            periodEnd: periodEnd.toISOString(),
+            cacheHit: true 
+          });
+          
+          return res.json({
+            success: true,
+            message: 'Agent call analytics retrieved successfully (cached)',
+            data: cachedData,
+            meta: {
+              operationId,
+              duration: `${Date.now() - startTime}ms`,
+              cached: true
+            }
+          });
+        }
+      } catch (cacheError) {
+        Logger.warn('Cache retrieval failed, fetching from database', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get collections
+      const agentsCollection = connection.db.collection('agents');
+      const callsCollection = connection.db.collection('calls');
+
+      // Step 1: Verify agent exists
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      // Determine date grouping format based on groupBy parameter
+      let dateFormat, dateGroup;
+      switch (groupBy) {
+        case 'week':
+          dateFormat = '%Y-W%U'; // Year-Week
+          dateGroup = {
+            year: { $year: { $toDate: '$start_timestamp' } },
+            week: { $week: { $toDate: '$start_timestamp' } }
+          };
+          break;
+        case 'month':
+          dateFormat = '%Y-%m'; // Year-Month
+          dateGroup = {
+            year: { $year: { $toDate: '$start_timestamp' } },
+            month: { $month: { $toDate: '$start_timestamp' } }
+          };
+          break;
+        case 'day':
+        default:
+          dateFormat = '%Y-%m-%d'; // Year-Month-Day
+          dateGroup = {
+            year: { $year: { $toDate: '$start_timestamp' } },
+            month: { $month: { $toDate: '$start_timestamp' } },
+            day: { $dayOfMonth: { $toDate: '$start_timestamp' } }
+          };
+      }
+
+      // Step 2: Get successful vs unsuccessful calls over time
+      const successTimelineAggregation = await callsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        {
+          $addFields: {
+            dateKey: {
+              $dateToString: {
+                format: dateFormat,
+                date: { $toDate: '$start_timestamp' }
+              }
+            },
+            isSuccessful: {
+              $cond: {
+                if: { $eq: ['$call_analysis.custom_analysis_data.appointment_booked', true] },
+                then: true,
+                else: false
+              }
+            }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              date: '$dateKey',
+              successful: '$isSuccessful'
+            },
+            count: { $sum: 1 },
+            timestamp: { $min: '$start_timestamp' }
+          }
+        },
+        {
+          $sort: { timestamp: 1 }
+        }
+      ]).toArray();
+
+      // Step 3: Get peak call hours (hourly distribution)
+      const peakHoursAggregation = await callsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        {
+          $addFields: {
+            hour: { $hour: { $toDate: '$start_timestamp' } }
+          }
+        },
+        {
+          $group: {
+            _id: '$hour',
+            callCount: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { _id: 1 }
+        }
+      ]).toArray();
+
+      // Step 4: Get call outcome distribution by sentiment
+      const outcomeDistributionAggregation = await callsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              $ifNull: ['$call_analysis.user_sentiment', 'Unknown']
+            },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        }
+      ]).toArray();
+
+      // Step 5: Get overall statistics
+      const overallStatsAggregation = await callsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalCalls: { $sum: 1 },
+            successfulCalls: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$call_analysis.custom_analysis_data.appointment_booked', true] },
+                  1,
+                  0
+                ]
+              }
+            },
+            unsuccessfulCalls: {
+              $sum: {
+                $cond: [
+                  { $ne: ['$call_analysis.custom_analysis_data.appointment_booked', true] },
+                  1,
+                  0
+                ]
+              }
+            }
+          }
+        }
+      ]).toArray();
+
+      const overallStats = overallStatsAggregation[0] || {
+        totalCalls: 0,
+        successfulCalls: 0,
+        unsuccessfulCalls: 0
+      };
+
+      // Helper function to format date labels based on groupBy
+      const formatDateLabel = (dateStr, timestamp) => {
+        const date = new Date(timestamp);
+        switch (groupBy) {
+          case 'month':
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }); // "Oct 2025"
+          case 'week':
+            return `Week ${dateStr.split('-W')[1]}, ${dateStr.split('-W')[0]}`; // "Week 41, 2025"
+          case 'day':
+          default:
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); // "Oct 15, 2025"
+        }
+      };
+
+      // Format success timeline data
+      const timelineData = {};
+      successTimelineAggregation.forEach(item => {
+        const date = item._id.date;
+        if (!timelineData[date]) {
+          timelineData[date] = {
+            date,
+            dateLabel: formatDateLabel(date, item.timestamp),
+            successful: 0,
+            unsuccessful: 0,
+            timestamp: item.timestamp
+          };
+        }
+        if (item._id.successful === true) {
+          timelineData[date].successful = item.count;
+        } else {
+          timelineData[date].unsuccessful = item.count;
+        }
+      });
+
+      const successTimeline = Object.values(timelineData).sort((a, b) => a.timestamp - b.timestamp);
+
+      Logger.debug('Success timeline data processed', {
+        operationId,
+        rawAggregationCount: successTimelineAggregation.length,
+        timelineDataKeys: Object.keys(timelineData).length,
+        successTimelineLength: successTimeline.length,
+        sampleData: successTimeline.slice(0, 3)
+      });
+
+      // Format peak hours data (ensure all 24 hours are represented)
+      const peakHours = Array.from({ length: 24 }, (_, hour) => {
+        const hourData = peakHoursAggregation.find(item => item._id === hour);
+        return {
+          hour,
+          callCount: hourData ? hourData.callCount : 0,
+          hourLabel: `${hour.toString().padStart(2, '0')}:00`
+        };
+      });
+
+      // Calculate total calls for percentage calculation
+      const totalCallsForOutcome = outcomeDistributionAggregation.reduce((sum, item) => sum + item.count, 0);
+
+      // Format outcome distribution data
+      const outcomeDistribution = outcomeDistributionAggregation.map(item => ({
+        sentiment: item._id,
+        count: item.count,
+        percentage: totalCallsForOutcome > 0 
+          ? Math.round((item.count / totalCallsForOutcome) * 10000) / 100 
+          : 0
+      }));
+
+      // Build response
+      const responseData = {
+        agent: {
+          agentId: agentDocument.agentId,
+          name: agentDocument.name,
+          description: agentDocument.description
+        },
+        dateRange: {
+          start: periodStart.toISOString(),
+          end: periodEnd.toISOString(),
+          groupBy
+        },
+        summary: {
+          totalCalls: overallStats.totalCalls,
+          successfulCalls: overallStats.successfulCalls,
+          unsuccessfulCalls: overallStats.unsuccessfulCalls,
+          successRate: overallStats.totalCalls > 0 
+            ? Math.round((overallStats.successfulCalls / overallStats.totalCalls) * 10000) / 100 
+            : 0
+        },
+        successTimeline,
+        peakHours,
+        outcomeDistribution
+      };
+
+      // Cache the results for 5 minutes
+      try {
+        await redisService.cacheAgentStats(cacheKey, cacheKey, responseData, 300);
+        Logger.debug('Agent call analytics cached', { 
+          operationId, 
+          agentId,
+          periodStart: periodStart.toISOString(),
+          periodEnd: periodEnd.toISOString()
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to cache agent call analytics', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Agent call analytics fetched successfully', {
+        operationId,
+        subaccountId,
+        agentId,
+        totalCalls: overallStats.totalCalls,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Agent call analytics retrieved successfully',
+        data: responseData,
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cached: false
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getAgentCallAnalytics', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get agent call costs breakdown with product-level details
+  static async getAgentCallCostsBreakdown(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+
+      // Get date range from query params
+      const startDateParam = req.query.startDate;
+      const endDateParam = req.query.endDate;
+
+      // Default to last 30 days if not provided
+      const now = new Date();
+      let periodStart, periodEnd;
+
+      if (startDateParam && endDateParam) {
+        // Validate date format and parse
+        periodStart = new Date(startDateParam);
+        periodEnd = new Date(endDateParam);
+
+        // Validate dates
+        if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ)',
+            code: 'INVALID_DATE_FORMAT'
+          });
+        }
+
+        if (periodStart >= periodEnd) {
+          return res.status(400).json({
+            success: false,
+            message: 'startDate must be before endDate',
+            code: 'INVALID_DATE_RANGE'
+          });
+        }
+
+        // Check if date range is not too large (max 2 years)
+        const daysDiff = (periodEnd - periodStart) / (1000 * 60 * 60 * 24);
+        if (daysDiff > 730) {
+          return res.status(400).json({
+            success: false,
+            message: 'Date range cannot exceed 730 days (2 years)',
+            code: 'DATE_RANGE_TOO_LARGE'
+          });
+        }
+      } else {
+        // Default: last 30 days
+        periodEnd = now;
+        periodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+
+      Logger.info('Fetching agent call costs breakdown', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString()
+      });
+
+      // Check cache first
+      const cacheKey = `${subaccountId}:${agentId}:costs-breakdown:${periodStart.getTime()}:${periodEnd.getTime()}`;
+      try {
+        const cachedData = await redisService.getCachedAgentStats(cacheKey, cacheKey);
+        if (cachedData) {
+          Logger.debug('Using cached call costs breakdown', { 
+            operationId, 
+            agentId,
+            periodStart: periodStart.toISOString(),
+            periodEnd: periodEnd.toISOString(),
+            cacheHit: true 
+          });
+          
+          return res.json({
+            success: true,
+            message: 'Agent call costs breakdown retrieved successfully (cached)',
+            data: cachedData,
+            meta: {
+              operationId,
+              duration: `${Date.now() - startTime}ms`,
+              cached: true
+            }
+          });
+        }
+      } catch (cacheError) {
+        Logger.warn('Cache retrieval failed, fetching from database', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get collections
+      const agentsCollection = connection.db.collection('agents');
+      const callsCollection = connection.db.collection('calls');
+
+      // Step 1: Verify agent exists
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      // Step 2: Use aggregation to get cost breakdown
+      const costBreakdownAggregation = await callsCollection.aggregate([
+        // Match calls for this agent in the date range
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        // Unwind product_costs array to analyze each product separately
+        {
+          $unwind: {
+            path: '$call_cost.product_costs',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        // Group by product to get totals per product
+        {
+          $group: {
+            _id: '$call_cost.product_costs.product',
+            totalCost: { 
+              $sum: { $divide: [{ $ifNull: ['$call_cost.product_costs.cost', 0] }, 100] }
+            },
+            unitPrice: { 
+              $first: { $ifNull: ['$call_cost.product_costs.unit_price', 0] } 
+            },
+            callCount: { $sum: 1 }
+          }
+        },
+        // Sort by total cost descending
+        {
+          $sort: { totalCost: -1 }
+        }
+      ]).toArray();
+
+      // Step 3: Get overall cost summary using aggregation
+      const overallSummaryAggregation = await callsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalCalls: { $sum: 1 },
+            totalCombinedCost: { 
+              $sum: { $divide: [{ $ifNull: ['$call_cost.combined_cost', 0] }, 100] }
+            },
+            totalDurationSeconds: { 
+              $sum: { $ifNull: ['$call_cost.total_duration_seconds', 0] } 
+            },
+            avgDurationUnitPrice: { 
+              $avg: { $divide: [{ $ifNull: ['$call_cost.total_duration_unit_price', 0] }, 100] }
+            },
+            callsWithCost: {
+              $sum: {
+                $cond: [
+                  { $gt: [{ $ifNull: ['$call_cost.combined_cost', 0] }, 0] },
+                  1,
+                  0
+                ]
+              }
+            }
+          }
+        }
+      ]).toArray();
+
+      const overallSummary = overallSummaryAggregation[0] || {
+        totalCalls: 0,
+        totalCombinedCost: 0,
+        totalDurationSeconds: 0,
+        avgDurationUnitPrice: 0,
+        callsWithCost: 0
+      };
+
+      // Calculate duration cost
+      const totalDurationCost = overallSummary.totalDurationSeconds * overallSummary.avgDurationUnitPrice;
+
+      // Step 4: Get individual calls for detailed view
+      const callDetailsAggregation = await callsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        {
+          $sort: { start_timestamp: -1 }
+        },
+        {
+          $limit: 100 // Limit to most recent 100 calls for performance
+        },
+        {
+          $project: {
+            _id: 0,
+            callId: '$call_id',
+            startTimestamp: '$start_timestamp',
+            endTimestamp: '$end_timestamp',
+            duration: '$call_cost.total_duration_seconds',
+            combinedCost: { $divide: [{ $ifNull: ['$call_cost.combined_cost', 0] }, 100] },
+            productCosts: '$call_cost.product_costs',
+            durationUnitPrice: { $divide: [{ $ifNull: ['$call_cost.total_duration_unit_price', 0] }, 100] }
+          }
+        }
+      ]).toArray();
+
+      // Format product breakdown
+      const productBreakdown = costBreakdownAggregation
+        .filter(item => item._id) // Filter out null products
+        .map(item => ({
+          product: item._id,
+          unitPrice: Math.round(item.unitPrice * 1000000) / 1000000, // Round to 6 decimals
+          totalCost: Math.round(item.totalCost * 100) / 100,
+          callCount: item.callCount,
+          avgCostPerCall: item.callCount > 0 ? Math.round((item.totalCost / item.callCount) * 100) / 100 : 0
+        }));
+
+      // Calculate total product costs
+      const totalProductCosts = productBreakdown.reduce((sum, item) => sum + item.totalCost, 0);
+
+      // Format calls
+      const calls = callDetailsAggregation.map(call => ({
+        callId: call.callId,
+        startTimestamp: call.startTimestamp,
+        endTimestamp: call.endTimestamp,
+        startDate: call.startTimestamp ? new Date(call.startTimestamp).toISOString() : null,
+        endDate: call.endTimestamp ? new Date(call.endTimestamp).toISOString() : null,
+        duration: call.duration || 0,
+        combinedCost: call.combinedCost ? Math.round(call.combinedCost * 100) / 100 : 0,
+        durationUnitPrice: call.durationUnitPrice ? Math.round(call.durationUnitPrice * 1000000) / 1000000 : 0,
+        productCosts: (call.productCosts || []).map(pc => ({
+          product: pc.product,
+          unitPrice: Math.round((pc.unit_price || 0) * 1000000) / 1000000,
+          cost: Math.round(((pc.cost || 0) / 100) * 100) / 100
+        }))
+      }));
+
+      // Build response
+      const responseData = {
+        agent: {
+          agentId: agentDocument.agentId,
+          name: agentDocument.name,
+          description: agentDocument.description
+        },
+        dateRange: {
+          start: periodStart.toISOString(),
+          end: periodEnd.toISOString()
+        },
+        summary: {
+          totalCalls: overallSummary.totalCalls,
+          callsWithCostData: overallSummary.callsWithCost,
+          cumulativeCosts: {
+            totalCombinedCost: Math.round(overallSummary.totalCombinedCost * 100) / 100,
+            totalProductCosts: Math.round(totalProductCosts * 100) / 100,
+            totalDurationCost: Math.round(totalDurationCost * 100) / 100,
+            avgCostPerCall: overallSummary.callsWithCost > 0 
+              ? Math.round((overallSummary.totalCombinedCost / overallSummary.callsWithCost) * 100) / 100 
+              : 0
+          },
+          duration: {
+            totalDurationSeconds: Math.round(overallSummary.totalDurationSeconds * 100) / 100,
+            avgDurationSeconds: overallSummary.totalCalls > 0 
+              ? Math.round((overallSummary.totalDurationSeconds / overallSummary.totalCalls) * 100) / 100 
+              : 0,
+            avgDurationUnitPrice: Math.round(overallSummary.avgDurationUnitPrice * 1000000) / 1000000
+          }
+        },
+        productBreakdown,
+        calls: {
+          count: calls.length,
+          limit: 100,
+          note: calls.length === 100 ? 'Showing most recent 100 calls only' : 'Showing all calls in date range',
+          data: calls
+        }
+      };
+
+      // Cache the results for 5 minutes
+      try {
+        await redisService.cacheAgentStats(cacheKey, cacheKey, responseData, 300);
+        Logger.debug('Agent call costs breakdown cached', { 
+          operationId, 
+          agentId,
+          periodStart: periodStart.toISOString(),
+          periodEnd: periodEnd.toISOString()
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to cache agent call costs breakdown', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Agent call costs breakdown fetched successfully', {
+        operationId,
+        subaccountId,
+        agentId,
+        totalCalls: overallSummary.totalCalls,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Agent call costs breakdown retrieved successfully',
+        data: responseData,
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cached: false
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getAgentCallCostsBreakdown', startTime);
       return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }
@@ -1811,6 +3022,9 @@ After appointment is booked:
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
       const { connection } = connectionInfo;
 
+      // Get deployed webhook URL from config
+      const deployedWebhookUrl = config.retell.deployedWebhookServerUrl || config.webhookServer.deployedUrl || 'https://scalai-b-48660c785242.herokuapp.com';
+
       // Step 1: Create LLM (same as normal agent)
       Logger.info('Creating LLM for chat agent', { operationId, subaccountId, name });
       
@@ -1875,9 +3089,8 @@ TRANSITIONS
 
 You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
 
-Check availability for a slot using check_availablity function.
+Check availability for a slot using check_availability function.
 Specifications for check_availability function
-#  Use {{agent_id}} as agent_id in payload
 # send payload time in Europe/Madrid timezone
 
 
@@ -1887,31 +3100,27 @@ ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
               {
                 type: "custom",
                 name: "check_availability",
-                url: "https://scalai-b-48660c785242.herokuapp.com/api/webhooks/check-availability",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/check-availability",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Check the availability of the appointment",
+                description: "Check if a specific time slot is available for booking an appointment",
                 parameters: {
                   type: "object",
                   properties: {
-                    agent_id: {
-                      type: "integer",
-                      description: "The agent id for which the availability is to be checked."
-                    },
                     date: {
                       type: "string",
-                      description: "The date of the appointment in yyyy-mm-dd format"
+                      description: "Date in YYYY-MM-DD format"
                     },
-                    start_time: {
+                    startTime: {
                       type: "string",
-                      description: "The start time of the appointment in hh:mm format 24 hour format"
+                      description: "Start time in HH:mm format (24-hour)"
                     },
-                    end_time: {
+                    endTime: {
                       type: "string",
-                      description: "The end time of the appointment in hh:mm format 24 hour format"
+                      description: "End time in HH:mm format (24-hour)"
                     }
                   },
-                  required: ["agent_id", "date", "start_time", "end_time"]
+                  required: ["date", "startTime", "endTime"]
                 },
                 execution_message_description: "Checking availability for the appointment",
                 timeout_ms: 120000
@@ -1920,92 +3129,46 @@ ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
             edges: [
               {
                 destination_state_name: "book_appointment_state",
-                description: "If the slot checked is available and user agrees to proceed further on booking meet.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "The date at which meeting is to be booked in yyyy-mm-dd format"
-                    },
-                    end_time: {
-                      type: "string",
-                      description: "The end time of meeting in hh:mm format."
-                    },
-                    start_time: {
-                      type: "string",
-                      description: "The start time of meeting in hh:mm format."
-                    },
-                    timezone: {
-                      type: "string",
-                      description: "The timezone to book meeting in +hh:mm / -hh:mm format"
-                    }
-                  },
-                  required: ["date", "start_time", "end_time", "timezone"]
-                }
+                description: "If the slot checked is available and user agrees to proceed further on booking meet."
               }
             ]
           },
           {
             name: "nearest_slots_state",
             description: "State for finding nearest available slots",
-            state_prompt: `Do not ask to proceed before calling nearest_available_slots function. Do it whenever required
+            state_prompt: `You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
 
-You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
+Use nearest_available_slots function to find available slots. It responds with available slots in 30 days range from start date.
+So if no slots found in 30 days range, extend startDate by 30 days unless you find a slot.
 
-Do not suggest slots like a list if multiple slots are fetched, instead keep your tone like a normal conversation and suggetion.
-ALWAYS, After getting response back from nearest_available_slots custom function, filter out the slot options those are already suggested in earlier nearest_available_slots custom function:calls.
-For example, if a slot is suggested and user asks for more options, then the previously suggested slot is also returned in response, so you should not repeat and suggest it again. ALWAYS MAKEIT SURE.
+After user agrees to book appointment for a slot, then only transition to book_appointment_state, otherwise do not.
 
-If same slots are returned, find more slots by increasing value of n. Do this until atleast one new slot is got.
-
-# If no from_date and to_date are mentioned, do not ask it. Consider from_date be today and to_date be null. 
-# If from_date and to_date is mentioned, use them in payload. Do not use whichever is not mentioned.
-# Do not assume any date on your own. (Only consider today's date as from_date if from_date is not mentioned)
-
-
-Specifications about, nearest_available_slots custom function:
-# Use {{agent_id}} as agent_id in payload
-# Use nearest_available_slots function to get n number of available slots.
-Unless mentioned, number of slots to fetch be 1 by default. If asked by user for more options then increase n value to get more available slots.
-# default duration in minutes is 30.
-# send payload time in Europe/Madrid timezone
-
-
-ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
+DO NOT MENTION FUNCTION nearest_available_slots NAME ANYTIME DURING THE CONVERSATION`,
             tools: [
               {
                 type: "custom",
                 name: "nearest_available_slots",
-                url: "https://scalai-b-48660c785242.herokuapp.com/api/webhooks/nearest-available-slots",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Get the nearest available time slots for an appointment",
+                description: "Find the nearest available appointment slots",
                 parameters: {
                   type: "object",
                   properties: {
-                    agent_id: {
-                      type: "integer",
-                      description: "The agent id for which to find available slots"
-                    },
-                    n: {
-                      type: "integer",
-                      description: "Number of nearest available slots to find"
-                    },
-                    from_datetime: {
+                    startDate: {
                       type: "string",
-                      description: "Start datetime to search from in ISO format (YYYY-MM-DDTHH:mm:ssZ). Default from_time is current date and time."
+                      description: "Starting date to search from (YYYY-MM-DD)"
                     },
-                    to_datetime: {
-                      type: "string",
-                      description: "End datetime to search until in ISO format (YYYY-MM-DDTHH:mm:ssZ)"
+                    count: {
+                      type: "number",
+                      description: "Number of available slots to return (default: 5)"
                     },
-                    duration_minutes: {
-                      type: "integer",
-                      description: "Duration of the appointment in minutes"
+                    durationMinutes: {
+                      type: "number",
+                      description: "Duration of each slot in minutes (default: 60)"
                     }
                   },
-                  required: ["agent_id", "n", "duration_minutes", "from_datetime"]
+                  required: ["startDate"]
                 },
                 execution_message_description: "Finding nearest available time slots",
                 timeout_ms: 120000
@@ -2014,42 +3177,19 @@ ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
             edges: [
               {
                 destination_state_name: "book_appointment_state",
-                description: "If user selects a slot to book meeting or agrees to proceed further on booking meet.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "The date at which meeting is to be booked in yyyy-mm-dd format"
-                    },
-                    end_time: {
-                      type: "string",
-                      description: "The end time of meeting in hh:mm format."
-                    },
-                    start_time: {
-                      type: "string",
-                      description: "The start time of meeting in hh:mm format."
-                    },
-                    timezone: {
-                      type: "string",
-                      description: "The timezone to book meeting in +hh:mm / -hh:mm format"
-                    }
-                  },
-                  required: ["date", "start_time", "end_time", "timezone"]
-                }
+                description: "If user selects a slot to book meeting or agrees to proceed further on booking meet."
               }
             ]
           },
           {
             name: "book_appointment_state",
-            description: "State for booking appointments",
-            state_prompt: `Do not ask to proceed before calling book_appointment function. Do it whenever required without waiting for instruction.
+            description: `You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
 
 Remember, if entered this state, book_appointment function has to be called at completion. 
 
-Specifications for book_appointment function
-#  Use {{agent_id}} as agent_id in payload
-# Use timezone passed from earlier state. It is also in +hh:mm or -hh:mm format
+- Collect name of user. Ask to spell it to understand properly. Repeat it letter by letter to confirm. be fluent like A....S....H....O....K for ashok. Speak like a normal conversation, no dashes and all
+- Collect email of user. Ask to spell it to understand properly. Repeat it letter by letter to confirm. Repeat it letter by letter to confirm. be fluent like A....S....H....O....K for ashok. Speak like a normal conversation, no dashes and all
+- Collect phone number. Repeat it digit by digit to confirm. 
 
 After appointment is booked:
 ## set appointment_booked variable to be true.
@@ -2059,48 +3199,51 @@ After appointment is booked:
               {
                 type: "custom",
                 name: "book_appointment",
-                url: "https://scalai-b-48660c785242.herokuapp.com/api/webhooks/book-appointment",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/book-appointment",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Book an appointment with the specified details",
+                description: "Book an appointment at a specific time slot",
                 parameters: {
                   type: "object",
                   properties: {
-                    agent_id: {
-                      type: "integer",
-                      description: "The agent id for which to book the appointment"
-                    },
                     date: {
                       type: "string",
-                      description: "The date of the appointment in yyyy-mm-dd format"
+                      description: "Appointment date (YYYY-MM-DD)"
                     },
-                    start_time: {
+                    startTime: {
                       type: "string",
-                      description: "The start time of the appointment in hh:mm format 24 hour format"
+                      description: "Start time (HH:mm, 24-hour format)"
                     },
-                    end_time: {
+                    endTime: {
                       type: "string",
-                      description: "The end time of the appointment in hh:mm format 24 hour format"
+                      description: "End time (HH:mm, 24-hour format)"
                     },
-                    name: {
+                    title: {
                       type: "string",
-                      description: "Name of the person booking the appointment"
+                      description: "Meeting title"
                     },
-                    phone: {
+                    description: {
                       type: "string",
-                      description: "Phone number of the person booking the appointment. It must be 10 digit number without any other character. Just 10 digit number"
+                      description: "Meeting description"
                     },
-                    email: {
+                    customerName: {
                       type: "string",
-                      description: "Email address of the person booking the appointment"
+                      description: "Customer's name"
                     },
-                    timezone: {
+                    customerEmail: {
                       type: "string",
-                      description: "Timezone of the person booking the appointment in format like +hh:mm or -hh:mm",
-                      examples: ["+05:30", "-02:30", "+00:00"]
+                      description: "Customer's email address"
+                    },
+                    customerPhone: {
+                      type: "string",
+                      description: "Customer's phone number"
+                    },
+                    notes: {
+                      type: "string",
+                      description: "Additional notes"
                     }
                   },
-                  required: ["agent_id", "date", "start_time", "end_time", "name", "phone", "email", "timezone"]
+                  required: ["date", "startTime", "endTime", "title"]
                 },
                 execution_message_description: "Booking the appointment",
                 timeout_ms: 120000
@@ -2245,6 +3388,7 @@ After appointment is booked:
         voiceModel: agentResponse.voice_model,
         language: agentResponse.language,
         webhookUrl: agentResponse.webhook_url,
+        emailTemplate: null, // Email template for post-call summaries
         activated: false,  // Default to false
         createdAt: new Date(),
         createdBy: userId,
@@ -2917,6 +4061,197 @@ After appointment is booked:
     }
   }
 
+  // Delete chat agent
+  static async deleteChatAgent(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+
+      Logger.info('Deleting chat agent', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        effectiveRole: req.permission?.effectiveRole
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get collections
+      const chatAgentsCollection = connection.db.collection('chatagents');
+      const llmsCollection = connection.db.collection('llms');
+      const chatsCollection = connection.db.collection('chats');
+
+      // Step 1: Find the chat agent in MongoDB to get its LLM ID
+      const agentDocument = await chatAgentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      const llmId = agentDocument.llmId;
+
+      Logger.info('Chat agent found in database', {
+        operationId,
+        agentId,
+        llmId,
+        agentName: agentDocument.name
+      });
+
+      // Step 2: Fetch retell account data and create Retell instance
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+
+      // Step 3: Delete agent from Retell
+      try {
+        await retell.deleteChatAgent(agentId);
+        Logger.info('Chat agent deleted from Retell', {
+          operationId,
+          agentId
+        });
+      } catch (error) {
+        Logger.error('Failed to delete chat agent from Retell', {
+          operationId,
+          agentId,
+          error: error.message
+        });
+        // Continue with deletion even if Retell deletion fails
+      }
+
+      // Step 4: Delete LLM from Retell
+      if (llmId) {
+        try {
+          await retell.deleteLLM(llmId);
+          Logger.info('LLM deleted from Retell', {
+            operationId,
+            llmId
+          });
+        } catch (error) {
+          Logger.error('Failed to delete LLM from Retell', {
+            operationId,
+            llmId,
+            error: error.message
+          });
+          // Continue with deletion even if LLM deletion fails
+        }
+      }
+
+      // Step 5: Delete all chats associated with this agent
+      const chatsDeleteResult = await chatsCollection.deleteMany({ 
+        agent_id: agentId,
+        subaccountId: subaccountId 
+      });
+
+      Logger.info('Associated chats deleted from MongoDB', {
+        operationId,
+        agentId,
+        deletedCount: chatsDeleteResult.deletedCount
+      });
+
+      // Step 6: Delete chat agent document from MongoDB
+      const agentDeleteResult = await chatAgentsCollection.deleteOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      Logger.info('Chat agent document deleted from MongoDB', {
+        operationId,
+        agentId,
+        deletedCount: agentDeleteResult.deletedCount
+      });
+
+      // Step 7: Delete LLM document from MongoDB
+      if (llmId) {
+        const llmDeleteResult = await llmsCollection.deleteOne({ 
+          llmId: llmId,
+          subaccountId: subaccountId 
+        });
+
+        Logger.info('LLM document deleted from MongoDB', {
+          operationId,
+          llmId,
+          deletedCount: llmDeleteResult.deletedCount
+        });
+      }
+
+      // Step 8: Invalidate cache for this agent and its chats
+      try {
+        await redisService.invalidateChatAgentStats(subaccountId, agentId);
+        await redisService.invalidateChatList(subaccountId);
+        Logger.debug('Chat agent statistics and chat list cache invalidated', {
+          operationId,
+          agentId
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to invalidate chat agent cache', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.CHAT_AGENT_DELETED,
+        category: ACTIVITY_CATEGORIES.AGENT,
+        userId,
+        description: `Chat agent "${agentDocument.name}" deleted`,
+        metadata: {
+          agentId,
+          agentName: agentDocument.name,
+          llmId,
+          chatsDeleted: chatsDeleteResult.deletedCount
+        },
+        resourceId: agentId,
+        resourceName: agentDocument.name,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      res.json({
+        success: true,
+        message: 'Chat agent deleted successfully',
+        data: {
+          agentId,
+          llmId,
+          chatsDeleted: chatsDeleteResult.deletedCount,
+          deletedFromRetell: true,
+          deletedFromDatabase: true
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'deleteChatAgent', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
   // Update chat agent details (begin message, prompt, voice, etc.)
   static async updateChatAgentDetails(req, res, next) {
     const startTime = Date.now();
@@ -3290,6 +4625,193 @@ After appointment is booked:
         }
       }
     };
+  }
+
+  // Get email template for an agent
+  static async getAgentEmailTemplate(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user?.id || 'service';
+      const isServiceAuth = !!req.service;
+
+      Logger.info('Fetching agent email template', {
+        operationId,
+        subaccountId,
+        userId: isServiceAuth ? req.service.serviceName : userId,
+        agentId,
+        authType: isServiceAuth ? 'service' : 'user'
+      });
+
+      // Get database connection (use 'system' for service-to-service calls)
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, isServiceAuth ? 'system' : userId);
+      const { connection } = connectionInfo;
+
+      // Get agents collection
+      const agentsCollection = connection.db.collection('agents');
+
+      // Find the agent
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      }, {
+        projection: {
+          agentId: 1,
+          name: 1,
+          emailTemplate: 1
+        }
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      const duration = Date.now() - startTime;
+
+      res.json({
+        success: true,
+        message: 'Email template retrieved successfully',
+        data: {
+          agentId: agentDocument.agentId,
+          agentName: agentDocument.name,
+          emailTemplate: agentDocument.emailTemplate || null
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getAgentEmailTemplate', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Update email template for an agent
+  static async updateAgentEmailTemplate(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const { emailTemplate } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('Updating agent email template', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        hasEmailTemplate: !!emailTemplate
+      });
+
+      // Validate emailTemplate
+      if (emailTemplate !== null && typeof emailTemplate !== 'string') {
+        return res.status(400).json({
+          success: false,
+          message: 'Email template must be a string or null',
+          code: 'INVALID_EMAIL_TEMPLATE'
+        });
+      }
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get agents collection
+      const agentsCollection = connection.db.collection('agents');
+
+      // Check if agent exists
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      // Update email template
+      const updateResult = await agentsCollection.updateOne(
+        { agentId: agentId, subaccountId: subaccountId },
+        { 
+          $set: { 
+            emailTemplate: emailTemplate,
+            updatedAt: new Date(),
+            updatedBy: userId
+          } 
+        }
+      );
+
+      // Invalidate cache
+      try {
+        await redisService.invalidateAgentDetails(subaccountId, agentId);
+        Logger.debug('Agent details cache invalidated', {
+          operationId,
+          agentId
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to invalidate agent details cache', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.AGENT_UPDATED,
+        category: ACTIVITY_CATEGORIES.AGENT,
+        userId,
+        description: `Email template updated for agent "${agentDocument.name}"`,
+        metadata: {
+          agentId,
+          agentName: agentDocument.name,
+          hasEmailTemplate: !!emailTemplate
+        },
+        resourceId: agentId,
+        resourceName: agentDocument.name,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Agent email template updated successfully', {
+        operationId,
+        agentId,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Email template updated successfully',
+        data: {
+          agentId: agentDocument.agentId,
+          agentName: agentDocument.name,
+          emailTemplate: emailTemplate,
+          updated: updateResult.modifiedCount > 0
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'updateAgentEmailTemplate', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
   }
 }
 

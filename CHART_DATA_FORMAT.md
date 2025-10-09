@@ -8,7 +8,42 @@ Each insight response includes a `charts` array with multiple pre-configured cha
 - **Type**: The chart type (pie, bar, line, heatmap, etc.)
 - **Title**: Display title for the chart
 - **Description**: What the chart shows
+- **Width**: Recommended width as percentage of container (container is 50% of screen width)
 - **Data**: Ready-to-use data in a standard format
+
+## Width Property
+
+Each chart includes a `width` property that specifies the recommended width as a percentage of the container.
+
+**Important:**
+- The chart container itself takes up **50% of the screen width**
+- The `width` value is a percentage **relative to that container** (not the screen)
+- Example: `width: 50` means 50% of container = 25% of screen width
+- Example: `width: 100` means 100% of container = 50% of screen width
+
+**Recommended widths by chart type:**
+- **Pie Chart**: `50%` - Compact display works well for circular charts
+- **Bar Chart**: `100%` - Full width for easier comparison
+- **Horizontal Bar Chart**: `100%` - Full width for long labels
+- **Line Chart**: `100%` - Full width for timeline visualization
+- **Multi-line Chart**: `100%` - Full width for comparing multiple series
+- **Heatmap**: `100%` - Full width for 24-hour grid display
+
+**Frontend Implementation:**
+
+```jsx
+// React example - using inline styles
+<div className="chart-container" style={{ width: `${chart.width}%` }}>
+  <Chart data={chart.data} />
+</div>
+
+// Or with CSS-in-JS
+const chartStyle = {
+  width: `${chart.width}%`,
+  margin: '0 auto',
+  padding: '1rem'
+};
+```
 
 ## Chart Types Included
 
@@ -20,6 +55,7 @@ Shows the breakdown of activities across different categories.
   "type": "pie",
   "title": "Activity Distribution by Category",
   "description": "Breakdown of activities across different categories",
+  "width": 50,
   "data": {
     "labels": ["agent", "call", "chat", "connector", "chat_agent"],
     "values": [45, 67, 32, 8, 4],
@@ -60,6 +96,7 @@ Comparison of activity volumes across categories.
   "type": "bar",
   "title": "Activity Count by Category",
   "description": "Comparison of activity volumes across categories",
+  "width": 100,
   "data": {
     "labels": ["agent", "call", "chat", "connector", "chat_agent"],
     "datasets": [{
@@ -104,6 +141,7 @@ Shows the most common operations performed.
   "type": "horizontalBar",
   "title": "Top 10 Activity Types",
   "description": "Most common operations performed",
+  "width": 100,
   "data": {
     "labels": [
       "web call created",
@@ -155,6 +193,7 @@ Daily activity trend over the past week.
   "type": "line",
   "title": "Activity Timeline (Last 7 Days)",
   "description": "Daily activity trend over the past week",
+  "width": 100,
   "data": {
     "labels": ["2024-01-08", "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12", "2024-01-13", "2024-01-14"],
     "datasets": [{
@@ -203,6 +242,7 @@ Compare activity trends across different categories over time.
   "type": "line",
   "title": "Activity Trends by Category",
   "description": "Compare activity trends across different categories",
+  "width": 100,
   "data": {
     "labels": ["2024-01-08", "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12"],
     "datasets": [
@@ -263,6 +303,7 @@ Shows when activities occur throughout the week (day of week vs hour of day).
   "type": "heatmap",
   "title": "Activity Heatmap (Day vs Hour)",
   "description": "When activities occur throughout the week",
+  "width": 100,
   "data": [
     { "day": "Monday", "hour": 0, "value": 0 },
     { "day": "Monday", "hour": 1, "value": 0 },
@@ -307,6 +348,7 @@ const transformedData = heatmapData.data.reduce((acc, item) => {
         "type": "pie",
         "title": "Activity Distribution by Category",
         "description": "Breakdown of activities across different categories",
+        "width": 50,
         "data": {
           "labels": ["agent", "call", "chat", "connector"],
           "values": [45, 67, 32, 8],
@@ -317,6 +359,7 @@ const transformedData = heatmapData.data.reduce((acc, item) => {
         "type": "bar",
         "title": "Activity Count by Category",
         "description": "Comparison of activity volumes across categories",
+        "width": 100,
         "data": {
           "labels": ["agent", "call", "chat", "connector"],
           "datasets": [{
@@ -330,6 +373,7 @@ const transformedData = heatmapData.data.reduce((acc, item) => {
         "type": "line",
         "title": "Activity Timeline (Last 7 Days)",
         "description": "Daily activity trend over the past week",
+        "width": 100,
         "data": {
           "labels": ["2024-01-08", "2024-01-09", "2024-01-10"],
           "datasets": [{
@@ -531,7 +575,11 @@ function Dashboard({ insights }) {
   return (
     <div className="dashboard">
       {insights.charts.map((chart, index) => (
-        <div key={index} className="chart-card">
+        <div 
+          key={index} 
+          className="chart-card"
+          style={{ width: `${chart.width}%` }}
+        >
           <h3>{chart.title}</h3>
           <p>{chart.description}</p>
           <ChartRenderer chart={chart} />
