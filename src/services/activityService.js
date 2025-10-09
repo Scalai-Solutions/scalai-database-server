@@ -18,6 +18,7 @@ const ACTIVITY_TYPES = {
   
   // Call activities
   WEB_CALL_CREATED: 'web_call_created',
+  PHONE_CALL_CREATED: 'phone_call_created',
   CALL_UPDATED: 'call_updated',
   
   // Chat activities
@@ -30,7 +31,10 @@ const ACTIVITY_TYPES = {
   CONNECTOR_UPDATED: 'connector_updated',
   CONNECTOR_DELETED: 'connector_deleted',
   CONNECTOR_GOOGLE_CALENDAR_CONNECTED: 'connector_google_calendar_connected',
-  CONNECTOR_METADATA_UPDATED: 'connector_metadata_updated'
+  CONNECTOR_METADATA_UPDATED: 'connector_metadata_updated',
+  CONNECTOR_LIST_PHONE_NUMBERS: 'connector_list_phone_numbers',
+  CONNECTOR_UPDATE_PHONE_NUMBER: 'connector_update_phone_number',
+  CONNECTOR_DELETE_PHONE_NUMBER: 'connector_delete_phone_number'
 };
 
 /**

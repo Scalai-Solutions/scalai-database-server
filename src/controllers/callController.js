@@ -295,6 +295,183 @@ class CallController {
       }
     };
   }
+
+  /**
+   * Create a phone call using Retell
+   * POST /api/calls/:subaccountId/phone-call
+   */
+  static async createPhoneCall(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId } = req.params;
+      const { from_number, to_number, agent_id, metadata, dynamic_variables, retell_llm_dynamic_variables } = req.body;
+      const userId = req.user.id;
+
+      // Use dynamic_variables if provided, otherwise use retell_llm_dynamic_variables
+      const dynamicVars = dynamic_variables || retell_llm_dynamic_variables;
+
+      Logger.info('Creating phone call', {
+        operationId,
+        subaccountId,
+        userId,
+        from_number,
+        to_number,
+        agent_id,
+        dynamic_variables: dynamicVars,
+        effectiveRole: req.permission?.effectiveRole
+      });
+
+      // Fetch retell account data (with caching)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      // Create Retell instance with decrypted API key
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+      
+      Logger.info('Retell instance created for phone call', {
+        operationId,
+        accountName: retellAccountData.accountName,
+        accountId: retellAccountData.id
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // If agent_id is provided, verify agent exists in database
+      if (agent_id) {
+        const agentsCollection = connection.db.collection('agents');
+        const agentDocument = await agentsCollection.findOne({ 
+          agentId: agent_id,
+          subaccountId: subaccountId 
+        });
+
+        if (!agentDocument) {
+          return res.status(404).json({
+            success: false,
+            message: 'Agent not found',
+            code: 'AGENT_NOT_FOUND'
+          });
+        }
+      }
+
+      // Verify from_number exists in phonenumbers collection
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      const phoneNumberDocument = await phoneNumbersCollection.findOne({
+        subaccountId: subaccountId,
+        phone_number: from_number
+      });
+
+      if (!phoneNumberDocument) {
+        return res.status(404).json({
+          success: false,
+          message: `Phone number ${from_number} not found. Please add it to your account first.`,
+          code: 'PHONE_NUMBER_NOT_FOUND'
+        });
+      }
+
+      // Create phone call with Retell
+      const callConfig = {
+        from_number,
+        to_number
+      };
+
+      if (agent_id) {
+        callConfig.agent_id = agent_id;
+      }
+      if (metadata) {
+        callConfig.metadata = metadata;
+      }
+      if (dynamicVars) {
+        callConfig.retell_llm_dynamic_variables = dynamicVars;
+      }
+
+      const phoneCallResponse = await retell.createPhoneCall(callConfig);
+
+      // Store call information in database
+      const callsCollection = connection.db.collection('calls');
+      const callDocument = {
+        call_id: phoneCallResponse.call_id,
+        agent_id: phoneCallResponse.agent_id || agent_id,
+        call_type: 'phone_call',
+        from_number: from_number,
+        to_number: to_number,
+        call_status: phoneCallResponse.call_status || 'registered',
+        metadata: metadata || {},
+        retell_llm_dynamic_variables: dynamicVars || null,
+        subaccountId: subaccountId,
+        createdBy: userId,
+        createdAt: new Date(),
+        operationId: operationId,
+        retellAccountId: retellAccountData.id
+      };
+
+      await callsCollection.insertOne(callDocument);
+      
+      Logger.info('Phone call created and stored in database', {
+        operationId,
+        subaccountId,
+        from_number,
+        to_number,
+        callId: phoneCallResponse.call_id
+      });
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.PHONE_CALL_CREATED,
+        category: ACTIVITY_CATEGORIES.CALL,
+        userId,
+        description: `Phone call created from ${from_number} to ${to_number}`,
+        metadata: {
+          callId: phoneCallResponse.call_id,
+          from_number,
+          to_number,
+          agent_id: phoneCallResponse.agent_id || agent_id,
+          dynamic_variables: dynamicVars
+        },
+        resourceId: phoneCallResponse.call_id,
+        resourceName: `Call to ${to_number}`,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      return res.status(200).json({
+        success: true,
+        message: 'Phone call created successfully',
+        data: {
+          call_id: phoneCallResponse.call_id,
+          agent_id: phoneCallResponse.agent_id,
+          from_number: phoneCallResponse.from_number,
+          to_number: phoneCallResponse.to_number,
+          call_status: phoneCallResponse.call_status,
+          call_type: 'phone_call'
+        },
+        retellAccount: {
+          accountName: retellAccountData.accountName,
+          accountId: retellAccountData.id
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await CallController.handleError(error, req, operationId, 'createPhoneCall', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
 }
 
 module.exports = CallController; 

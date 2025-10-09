@@ -320,6 +320,49 @@ class Retell {
   }
 
   /**
+   * Create a phone call
+   * @param {Object} callConfig - Phone call configuration
+   * @param {string} callConfig.from_number - Phone number to call from
+   * @param {string} callConfig.to_number - Phone number to call to
+   * @param {string} callConfig.agent_id - Agent ID to use for the call (optional if phone has default)
+   * @param {Object} callConfig.metadata - Additional metadata (optional)
+   * @returns {Promise<Object>} The phone call response
+   */
+  async createPhoneCall(callConfig) {
+    try {
+      Logger.info('Creating phone call', {
+        from_number: callConfig.from_number,
+        to_number: callConfig.to_number,
+        agent_id: callConfig.agent_id,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const phoneCallResponse = await this.client.call.createPhoneCall(callConfig);
+      
+      Logger.info('Phone call created successfully', {
+        callId: phoneCallResponse.call_id,
+        from_number: callConfig.from_number,
+        to_number: callConfig.to_number,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return phoneCallResponse;
+    } catch (error) {
+      Logger.error('Failed to create phone call', {
+        from_number: callConfig.from_number,
+        to_number: callConfig.to_number,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message,
+        stack: error.stack
+      });
+      throw new Error(`Failed to create phone call: ${error.message}`);
+    }
+  }
+
+  /**
    * Create a new chat with an agent
    * @param {string} agentId - The agent ID to use for the chat
    * @returns {Promise<Object>} The chat response with chat_id, agent_id, etc.

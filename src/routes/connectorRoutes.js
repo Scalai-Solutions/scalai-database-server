@@ -19,6 +19,11 @@ const {
   validateUpdateConnectorConfigBody
 } = require('../validators/connectorValidator');
 
+const {
+  validatePhoneNumber,
+  validateUpdatePhoneNumber
+} = require('../validators/phoneNumberValidator');
+
 // Apply request logger to all routes
 router.use(requestLogger);
 
@@ -46,6 +51,33 @@ router.get('/:subaccountId',
   requireResourcePermission(),
   subaccountLimiter(100, 60000),
   ConnectorController.getSubaccountConnectors
+);
+
+// Phone Number Management Routes (must come BEFORE generic /:subaccountId/:connectorId routes)
+// GET /api/connectors/:subaccountId/phone-numbers - Get all phone numbers
+router.get('/:subaccountId/phone-numbers',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  ConnectorController.getAllPhoneNumbers
+);
+
+// PUT /api/connectors/:subaccountId/phone-numbers/:phoneNumber - Update phone number agent assignment
+router.put('/:subaccountId/phone-numbers/:phoneNumber',
+  validateSubaccountId,
+  validateUpdatePhoneNumber,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  ConnectorController.updatePhoneNumber
+);
+
+// DELETE /api/connectors/:subaccountId/phone-numbers/:phoneNumber - Delete phone number from all systems
+router.delete('/:subaccountId/phone-numbers/:phoneNumber',
+  validateSubaccountId,
+  validatePhoneNumber,
+  requireResourcePermission(),
+  subaccountLimiter(20, 60000),
+  ConnectorController.deletePhoneNumber
 );
 
 // GET /api/connectors/:subaccountId/:connectorId - Get a specific connector for a subaccount
@@ -87,6 +119,87 @@ router.post('/:subaccountId/metadata/update',
   validateSubaccountId,
   authenticateServiceToken,
   ConnectorController.updateConnectorMetadata
+);
+
+// Twilio Routes
+// GET /api/connectors/:subaccountId/twilio/getEmergencyAddress - Get all address resources
+router.get('/:subaccountId/twilio/getEmergencyAddress',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  ConnectorController.getEmergencyAddress
+);
+
+// POST /api/connectors/:subaccountId/twilio/setEmergencyAddress - Set an address as emergency address
+router.post('/:subaccountId/twilio/setEmergencyAddress',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  ConnectorController.setEmergencyAddress
+);
+
+// POST /api/connectors/:subaccountId/twilio/createEmergencyAddress - Create emergency address
+router.post('/:subaccountId/twilio/createEmergencyAddress',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  ConnectorController.createEmergencyAddress
+);
+
+// POST /api/connectors/:subaccountId/twilio/setup/:emergencyAddressId - Setup Twilio for Retell AI
+router.post('/:subaccountId/twilio/setup/:emergencyAddressId',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(10, 60000),
+  ConnectorController.setupTwilioForRetell
+);
+
+// GET /api/connectors/:subaccountId/twilio/phoneNumbers - Get purchased phone numbers
+router.get('/:subaccountId/twilio/phoneNumbers',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  ConnectorController.getTwilioPhoneNumbers
+);
+
+// GET /api/connectors/:subaccountId/twilio/availablePhoneNumbers - Search available phone numbers
+router.get('/:subaccountId/twilio/availablePhoneNumbers',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  ConnectorController.searchAvailablePhoneNumbers
+);
+
+// POST /api/connectors/:subaccountId/twilio/phoneNumbers/purchase - Purchase a phone number
+router.post('/:subaccountId/twilio/phoneNumbers/purchase',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(20, 60000),
+  ConnectorController.purchaseTwilioPhoneNumber
+);
+
+// GET /api/connectors/:subaccountId/twilio - Get Twilio account info
+router.get('/:subaccountId/twilio',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  ConnectorController.getTwilioClient
+);
+
+// POST /api/connectors/:subaccountId/twilio/verify - Verify Twilio credentials
+router.post('/:subaccountId/twilio/verify',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  ConnectorController.verifyTwilioCredentials
+);
+
+// DELETE /api/connectors/:subaccountId/twilio/cache - Invalidate Twilio cache
+router.delete('/:subaccountId/twilio/cache',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  ConnectorController.invalidateTwilioCache
 );
 
 module.exports = router;

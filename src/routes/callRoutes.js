@@ -15,7 +15,10 @@ const {
   validateSubaccountId,
   validateAgentId
 } = require('../validators/databaseValidator');
-const { validateCreateWebCallBody } = require('../validators/callValidator');
+const { 
+  validateCreateWebCallBody,
+  validateCreatePhoneCallBody
+} = require('../validators/callValidator');
 
 // Webhook endpoint for updating calls (service token auth only - BEFORE common middleware)
 router.patch('/:subaccountId/webhook-update',
@@ -36,6 +39,15 @@ router.post('/:subaccountId/web-call',
   requireResourcePermission(),
   subaccountLimiter(100, 60000),
   CallController.createWebCall
+);
+
+// POST /api/calls/:subaccountId/phone-call - Create a phone call
+router.post('/:subaccountId/phone-call',
+  validateSubaccountId,
+  validateCreatePhoneCallBody,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  CallController.createPhoneCall
 );
 
 module.exports = router; 
