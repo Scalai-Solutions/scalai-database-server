@@ -1224,6 +1224,7 @@ After appointment is booked:
         {
           $match: {
             subaccountId: subaccountId,
+            agentId: agentId,
             createdAt: {
               $gte: previousPeriodStart
             }
@@ -1690,6 +1691,7 @@ After appointment is booked:
         {
           $match: {
             subaccountId: subaccountId,
+            agentId: agentId,
             createdAt: {
               $gte: previousPeriodStart
             }
