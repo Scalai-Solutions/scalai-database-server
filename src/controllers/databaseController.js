@@ -3845,6 +3845,7 @@ After appointment is booked:
       // Get collections
       const chatAgentsCollection = connection.db.collection('chatagents');
       const chatsCollection = connection.db.collection('chats');
+      const meetingsCollection = connection.db.collection('meetings');
 
       // Step 1: Find the chat agent
       const agentDocument = await chatAgentsCollection.findOne({ 
@@ -3899,18 +3900,20 @@ After appointment is booked:
             },
             // Identify unresponsive chats
             isUnresponsive: {
-              $or: [
-                { $eq: [{ $ifNull: ['$chat_analysis.user_sentiment', null] }, null] },
-                { $eq: ['$chat_status', 'failed'] }
-              ]
-            },
-            // Chat successful flag
-            isChatSuccessful: {
-              $cond: {
-                if: { $eq: ['$chat_analysis.chat_successful', true] },
-                then: 1,
-                else: 0
-              }
+                // Check if messages array has no messages with role 'agent'
+                  $eq: [
+                    {
+                      $size: {
+                        $filter: {
+                          input: { $ifNull: ['$messages', []] },
+                          as: 'msg',
+                          cond: { $eq: ['$$msg.role', 'agent'] }
+                        }
+                      }
+                    },
+                    0
+                  ]
+              
             }
           }
         },
@@ -3928,51 +3931,102 @@ After appointment is booked:
             unresponsiveChats: {
               $sum: { $cond: ['$isUnresponsive', 1, 0] }
             },
-            successfulChats: {
-              $sum: '$isChatSuccessful'
-            },
             chatIds: { $push: '$chat_id' }
           }
         },
-        // Calculate cumulative success rate
         {
           $project: {
             _id: 1,
             totalChats: 1,
             unresponsiveChats: 1,
-            successfulChats: 1,
-            chatIds: 1,
-            cumulativeSuccessRate: {
+            chatIds: 1
+          }
+        }
+      ]).toArray();
+
+      // Get meetings count for both periods (successful chats = meetings booked)
+      const meetingsAggregation = await meetingsCollection.aggregate([
+        {
+          $match: {
+            subaccountId: subaccountId,
+            agentId: agentId,
+            createdAt: {
+              $gte: previousPeriodStart
+            }
+          }
+        },
+        {
+          $addFields: {
+            period: {
               $cond: {
-                if: { $gt: ['$totalChats', 0] },
-                then: {
-                  $multiply: [
-                    { $divide: ['$successfulChats', '$totalChats'] },
-                    100
+                if: {
+                  $and: [
+                    { $gte: ['$createdAt', currentPeriodStart] },
+                    { $lte: ['$createdAt', currentPeriodEnd] }
                   ]
                 },
-                else: 0
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$createdAt', previousPeriodStart] },
+                        { $lt: ['$createdAt', previousPeriodEnd] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
               }
             }
+          }
+        },
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$period',
+            count: { $sum: 1 }
           }
         }
       ]).toArray();
 
       // Parse aggregation results
-      const currentStats = statisticsAggregation.find(s => s._id === 'current') || {
+      const currentStatsRaw = statisticsAggregation.find(s => s._id === 'current') || {
         totalChats: 0,
         unresponsiveChats: 0,
-        successfulChats: 0,
-        cumulativeSuccessRate: 0,
         chatIds: []
       };
 
-      const previousStats = statisticsAggregation.find(s => s._id === 'previous') || {
+      const previousStatsRaw = statisticsAggregation.find(s => s._id === 'previous') || {
         totalChats: 0,
         unresponsiveChats: 0,
-        successfulChats: 0,
-        cumulativeSuccessRate: 0,
         chatIds: []
+      };
+
+      // Parse meetings aggregation results (meetings booked = successful chats)
+      const currentPeriodMeetings = meetingsAggregation.find(m => m._id === 'current')?.count || 0;
+      const previousPeriodMeetings = meetingsAggregation.find(m => m._id === 'previous')?.count || 0;
+
+      // Combine stats with meetings count
+      const currentStats = {
+        ...currentStatsRaw,
+        successfulChats: currentPeriodMeetings,
+        cumulativeSuccessRate: currentStatsRaw.totalChats > 0 
+          ? (currentPeriodMeetings / currentStatsRaw.totalChats) * 100 
+          : 0
+      };
+
+      const previousStats = {
+        ...previousStatsRaw,
+        successfulChats: previousPeriodMeetings,
+        cumulativeSuccessRate: previousStatsRaw.totalChats > 0 
+          ? (previousPeriodMeetings / previousStatsRaw.totalChats) * 100 
+          : 0
       };
 
       // Step 3: Calculate percentage changes
