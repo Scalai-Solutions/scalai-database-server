@@ -238,7 +238,7 @@ class AIInsightsService {
         description: 'Breakdown of activities across different categories',
         width: 50, // 50% of container width (compact for pie chart)
         data: {
-          labels: stats.byCategory.map(cat => cat._id),
+          labels: stats.byCategory.map(cat => cat._id || 'Unknown'),
           values: stats.byCategory.map(cat => cat.count),
           colors: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
         }
@@ -251,7 +251,7 @@ class AIInsightsService {
         description: 'Comparison of activity volumes across categories',
         width: 100, // 100% of container width (full width for comparison)
         data: {
-          labels: stats.byCategory.map(cat => cat._id),
+          labels: stats.byCategory.map(cat => cat._id || 'Unknown'),
           datasets: [{
             label: 'Activity Count',
             values: stats.byCategory.map(cat => cat.count),
@@ -271,7 +271,7 @@ class AIInsightsService {
         description: 'Most common operations performed',
         width: 100, // 100% of container width (full width for detailed list)
         data: {
-          labels: topTypes.map(type => type._id.replace(/_/g, ' ')),
+          labels: topTypes.map(type => (type._id || 'Unknown').replace(/_/g, ' ')),
           datasets: [{
             label: 'Count',
             values: topTypes.map(type => type.count),
