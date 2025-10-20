@@ -4869,6 +4869,436 @@ After appointment is booked:
       return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }
+
+  // ========== VOICE MANAGEMENT ==========
+
+  /**
+   * Get list of available voices (ElevenLabs only)
+   * GET /api/database/:subaccountId/voices
+   */
+  static async getVoices(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId } = req.params;
+      const userId = req.user.id;
+
+      Logger.info('Fetching available voices', {
+        operationId,
+        subaccountId,
+        userId
+      });
+
+      // Check cache first
+      try {
+        const cachedVoices = await redisService.getCachedVoices(subaccountId);
+        if (cachedVoices) {
+          const duration = Date.now() - startTime;
+          
+          Logger.info('Voices fetched from cache', {
+            operationId,
+            subaccountId,
+            count: cachedVoices.count,
+            duration: `${duration}ms`
+          });
+
+          return res.json({
+            success: true,
+            message: 'Voices fetched successfully',
+            data: cachedVoices,
+            meta: {
+              operationId,
+              duration: `${duration}ms`,
+              cached: true
+            }
+          });
+        }
+      } catch (cacheError) {
+        Logger.warn('Failed to get cached voices', {
+          operationId,
+          error: cacheError.message
+        });
+        // Continue to fetch from Retell if cache fails
+      }
+
+      // Fetch retell account data (with caching)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      // Create Retell instance with decrypted API key
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+      
+      // List all voices
+      const allVoices = await retell.listVoices();
+      
+      // Filter to only ElevenLabs voices
+      const elevenlabsVoices = allVoices.filter(voice => voice.provider === 'elevenlabs');
+
+      const voicesData = {
+        voices: elevenlabsVoices,
+        count: elevenlabsVoices.length
+      };
+
+      // Cache the results for 24 hours
+      try {
+        await redisService.cacheVoices(subaccountId, voicesData);
+        Logger.debug('Voices cached successfully', {
+          operationId,
+          subaccountId,
+          count: voicesData.count
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to cache voices', {
+          operationId,
+          error: cacheError.message
+        });
+        // Continue even if caching fails
+      }
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Voices fetched successfully', {
+        operationId,
+        totalVoices: allVoices.length,
+        elevenlabsVoices: elevenlabsVoices.length,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Voices fetched successfully',
+        data: voicesData,
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cached: false
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getVoices', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
+   * Update agent voice
+   * PATCH /api/database/:subaccountId/agents/:agentId/voice
+   */
+  static async updateAgentVoice(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const { voiceId } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('Updating agent voice', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        voiceId
+      });
+
+      // Fetch retell account data (with caching)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      // Create Retell instance with decrypted API key
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get agents collection
+      const agentsCollection = connection.db.collection('agents');
+
+      // Find the agent
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      // Update agent on Retell platform
+      const updateData = {
+        voice_id: voiceId
+      };
+
+      await retell.updateAgent(agentId, updateData);
+
+      Logger.info('Agent updated on Retell platform', {
+        operationId,
+        agentId,
+        voiceId
+      });
+
+      // Update agent in database
+      await agentsCollection.updateOne(
+        { agentId: agentId, subaccountId: subaccountId },
+        { 
+          $set: { 
+            voiceId: voiceId,
+            updatedAt: new Date(),
+            updatedBy: userId
+          } 
+        }
+      );
+
+      // Invalidate cache (both agent details and stats)
+      try {
+        await redisService.invalidateAgentDetails(subaccountId, agentId);
+        await redisService.invalidateAgentStats(subaccountId, agentId);
+        Logger.debug('Agent cache invalidated (details and stats)', {
+          operationId,
+          agentId
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to invalidate agent cache', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.AGENT_UPDATED,
+        category: ACTIVITY_CATEGORIES.AGENT,
+        userId,
+        description: `Voice updated for agent "${agentDocument.name}"`,
+        metadata: {
+          agentId,
+          agentName: agentDocument.name,
+          voiceId: voiceId
+        },
+        resourceId: agentId,
+        resourceName: agentDocument.name,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Agent voice updated successfully', {
+        operationId,
+        agentId,
+        voiceId,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Agent voice updated successfully',
+        data: {
+          agentId: agentDocument.agentId,
+          agentName: agentDocument.name,
+          voiceId: voiceId
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'updateAgentVoice', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
+   * Update agent LLM model
+   * PATCH /api/database/:subaccountId/agents/:agentId/llm
+   */
+  static async updateAgentLLM(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const { model } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('Updating agent LLM model', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        model
+      });
+
+      // Fetch retell account data (with caching)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      // Create Retell instance with decrypted API key
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get agents collection
+      const agentsCollection = connection.db.collection('agents');
+
+      // Find the agent
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Agent not found',
+          code: 'AGENT_NOT_FOUND'
+        });
+      }
+
+      // Get the LLM ID from the agent
+      const llmId = agentDocument.llmId;
+      
+      if (!llmId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Agent does not have an associated LLM',
+          code: 'NO_LLM_FOUND'
+        });
+      }
+
+      // Update LLM on Retell platform
+      const updateData = {
+        model: model
+      };
+
+      await retell.updateLLM(llmId, updateData);
+
+      Logger.info('LLM updated on Retell platform', {
+        operationId,
+        llmId,
+        model
+      });
+
+      // Update LLM in llms collection
+      const llmsCollection = connection.db.collection('llms');
+      await llmsCollection.updateOne(
+        { llmId: llmId, subaccountId: subaccountId },
+        { 
+          $set: { 
+            model: model,
+            updatedAt: new Date(),
+            updatedBy: userId
+          } 
+        }
+      );
+
+      // Also update agent document to keep model reference
+      await agentsCollection.updateOne(
+        { agentId: agentId, subaccountId: subaccountId },
+        { 
+          $set: { 
+            'model': model,
+            updatedAt: new Date(),
+            updatedBy: userId
+          } 
+        }
+      );
+
+      // Invalidate cache (both agent details and stats)
+      try {
+        await redisService.invalidateAgentDetails(subaccountId, agentId);
+        await redisService.invalidateAgentStats(subaccountId, agentId);
+        Logger.debug('Agent cache invalidated (details and stats)', {
+          operationId,
+          agentId
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to invalidate agent cache', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.AGENT_UPDATED,
+        category: ACTIVITY_CATEGORIES.AGENT,
+        userId,
+        description: `LLM model updated for agent "${agentDocument.name}" to ${model}`,
+        metadata: {
+          agentId,
+          agentName: agentDocument.name,
+          llmId: llmId,
+          model: model
+        },
+        resourceId: agentId,
+        resourceName: agentDocument.name,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Agent LLM updated successfully', {
+        operationId,
+        agentId,
+        llmId,
+        model,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Agent LLM model updated successfully',
+        data: {
+          agentId: agentDocument.agentId,
+          agentName: agentDocument.name,
+          llmId: llmId,
+          model: model
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'updateAgentLLM', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
 }
 
 module.exports = DatabaseController; 

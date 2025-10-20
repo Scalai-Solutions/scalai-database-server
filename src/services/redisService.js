@@ -296,6 +296,71 @@ class RedisService {
     return await this.del(key);
   }
 
+  // Call logs cache methods
+  async cacheCallLogs(subaccountId, data, ttl = 300) {
+    // Cache for 5 minutes by default as call logs can change
+    const key = `call:logs:${subaccountId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedCallLogs(subaccountId) {
+    const key = `call:logs:${subaccountId}`;
+    return await this.get(key);
+  }
+
+  async invalidateCallLogs(subaccountId) {
+    const key = `call:logs:${subaccountId}`;
+    return await this.del(key);
+  }
+
+  // Voice cache methods
+  async cacheVoices(subaccountId, data, ttl = 86400) {
+    // Cache for 24 hours as voices rarely change
+    const key = `voices:${subaccountId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedVoices(subaccountId) {
+    const key = `voices:${subaccountId}`;
+    return await this.get(key);
+  }
+
+  async invalidateVoices(subaccountId) {
+    const key = `voices:${subaccountId}`;
+    return await this.del(key);
+  }
+
+  // Knowledge base cache methods
+  async cacheKnowledgeBase(subaccountId, kbType, agentId, data, ttl = 3600) {
+    // Cache for 1 hour - KB data changes moderately
+    const key = agentId 
+      ? `kb:${subaccountId}:local:${agentId}`
+      : `kb:${subaccountId}:global`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedKnowledgeBase(subaccountId, kbType, agentId = null) {
+    const key = agentId 
+      ? `kb:${subaccountId}:local:${agentId}`
+      : `kb:${subaccountId}:global`;
+    return await this.get(key);
+  }
+
+  async invalidateKnowledgeBase(subaccountId, kbType, agentId = null) {
+    const key = agentId 
+      ? `kb:${subaccountId}:local:${agentId}`
+      : `kb:${subaccountId}:global`;
+    return await this.del(key);
+  }
+
+  async invalidateAllKnowledgeBases(subaccountId) {
+    // Invalidate all KB caches for a subaccount
+    // This is a simplified version - in production, you'd want to use SCAN with pattern matching
+    const globalKey = `kb:${subaccountId}:global`;
+    await this.del(globalKey);
+    // Note: Local KB caches would need individual invalidation when we know the agentId
+  }
+
   // Health check
   async ping() {
     if (!this.isConnected) {

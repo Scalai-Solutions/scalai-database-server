@@ -18,6 +18,7 @@ const connectorRoutes = require('./routes/connectorRoutes');
 const homeRoutes = require('./routes/homeRoutes');
 const activityRoutes = require('./routes/activityRoutes');
 const aiInsightsRoutes = require('./routes/aiInsightsRoutes');
+const knowledgeBaseRoutes = require('./routes/knowledgeBaseRoutes');
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use('/api/connectors', connectorRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/ai-insights', aiInsightsRoutes);
+app.use('/api/knowledge-base', knowledgeBaseRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -77,7 +79,8 @@ app.get('/', (req, res) => {
       connectors: '/api/connectors',
       home: '/api/home',
       activities: '/api/activities',
-      aiInsights: '/api/ai-insights'
+      aiInsights: '/api/ai-insights',
+      knowledgeBase: '/api/knowledge-base'
     }
   });
 });

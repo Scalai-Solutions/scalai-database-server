@@ -422,9 +422,19 @@ const requireResourcePermission = () => {
         basePrefix = '/api/chats';
       } else if (originalUrl.startsWith('/api/cache')) {
         basePrefix = '/api/cache';
-      }  else if (originalUrl.startsWith('/api/connectors')) {
+      } else if (originalUrl.startsWith('/api/connectors')) {
         basePrefix = '/api/connectors';
-      } 
+      } else if (originalUrl.startsWith('/api/knowledge-base')) {
+        basePrefix = '/api/knowledge-base';
+      } else if (originalUrl.startsWith('/api/activities')) {
+        basePrefix = '/api/activities';
+      } else if (originalUrl.startsWith('/api/ai-insights')) {
+        basePrefix = '/api/ai-insights';
+      } else if (originalUrl.startsWith('/api/home')) {
+        basePrefix = '/api/home';
+      } else if (originalUrl.startsWith('/api/health')) {
+        basePrefix = '/api/health';
+      }
       
       const routePath = `${basePrefix}${req.route?.path}`;
       const token = req.headers.authorization?.split(' ')[1];

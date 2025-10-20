@@ -17,7 +17,8 @@ const {
 } = require('../validators/databaseValidator');
 const { 
   validateCreateWebCallBody,
-  validateCreatePhoneCallBody
+  validateCreatePhoneCallBody,
+  validateCreateBatchCallBody
 } = require('../validators/callValidator');
 
 // Webhook endpoint for updating calls (service token auth only - BEFORE common middleware)
@@ -48,6 +49,39 @@ router.post('/:subaccountId/phone-call',
   requireResourcePermission(),
   subaccountLimiter(50, 60000),
   CallController.createPhoneCall
+);
+
+// POST /api/calls/:subaccountId/batch-call - Create a batch call
+router.post('/:subaccountId/batch-call',
+  validateSubaccountId,
+  validateCreateBatchCallBody,
+  requireResourcePermission(),
+  subaccountLimiter(10, 60000),
+  CallController.createBatchCall
+);
+
+// GET /api/calls/:subaccountId/logs - Get call logs (simple)
+router.get('/:subaccountId/logs',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  CallController.getCallLogs
+);
+
+// POST /api/calls/:subaccountId/logs/filter - Get call logs with filters and pagination
+router.post('/:subaccountId/logs/filter',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  CallController.getCallLogs
+);
+
+// DELETE /api/calls/:subaccountId/logs/:callId - Delete a call log
+router.delete('/:subaccountId/logs/:callId',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  CallController.deleteCallLog
 );
 
 module.exports = router; 

@@ -20,6 +20,8 @@ const ACTIVITY_TYPES = {
   WEB_CALL_CREATED: 'web_call_created',
   PHONE_CALL_CREATED: 'phone_call_created',
   CALL_UPDATED: 'call_updated',
+  CALL_LOGS_VIEWED: 'call_logs_viewed',
+  CALL_DELETED: 'call_deleted',
   
   // Chat activities
   CHAT_CREATED: 'chat_created',

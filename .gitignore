@@ -40,5 +40,7 @@ Thumbs.db
 dist/
 build/
 
+# Uploads
+uploads/
 
 package-lock.json

@@ -133,6 +133,32 @@ const activateChatAgentBodySchema = Joi.object({
     })
 });
 
+const updateAgentVoiceBodySchema = Joi.object({
+  voiceId: Joi.string()
+    .required()
+    .messages({
+      'string.empty': 'Voice ID is required',
+      'any.required': 'Voice ID is required'
+    })
+});
+
+const updateAgentLLMBodySchema = Joi.object({
+  model: Joi.string()
+    .valid(
+      'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
+      'gpt-4o', 'gpt-4o-mini',
+      'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+      'claude-3.7-sonnet', 'claude-3.5-haiku',
+      'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'
+    )
+    .required()
+    .messages({
+      'string.empty': 'Model is required',
+      'any.required': 'Model is required',
+      'any.only': 'Invalid model selected'
+    })
+});
+
 // Validation middleware factory
 const validate = (schema) => {
   return (req, res, next) => {
@@ -207,5 +233,7 @@ module.exports = {
   validateCreateAgentBody: validate(createAgentBodySchema),
   validateAgentId: validateParam('agentId', agentIdSchema),
   validateUpdateAgentDetailsBody: validate(updateAgentDetailsBodySchema),
-  validateActivateChatAgentBody: validate(activateChatAgentBodySchema)
+  validateActivateChatAgentBody: validate(activateChatAgentBodySchema),
+  validateUpdateAgentVoiceBody: validate(updateAgentVoiceBodySchema),
+  validateUpdateAgentLLMBody: validate(updateAgentLLMBodySchema)
 }; 

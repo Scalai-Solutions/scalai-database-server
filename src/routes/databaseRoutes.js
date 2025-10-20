@@ -16,7 +16,9 @@ const {
   validateCreateAgentBody,
   validateAgentId,
   validateUpdateAgentDetailsBody,
-  validateActivateChatAgentBody
+  validateActivateChatAgentBody,
+  validateUpdateAgentVoiceBody,
+  validateUpdateAgentLLMBody
 } = require('../validators/databaseValidator');
 
 // Apply common middleware to request logging only (auth is per-route)
@@ -125,6 +127,36 @@ router.patch('/:subaccountId/agents/:agentId/email-template',
   requireResourcePermission(),
   subaccountLimiter(100, 60000),
   DatabaseController.updateAgentEmailTemplate
+);
+
+// ========== VOICE MANAGEMENT ROUTES ==========
+
+// GET /api/database/:subaccountId/voices - Get list of available voices (ElevenLabs only)
+router.get('/:subaccountId/voices',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.getVoices
+);
+
+// PATCH /api/database/:subaccountId/agents/:agentId/voice - Update agent voice
+router.patch('/:subaccountId/agents/:agentId/voice',
+  validateSubaccountId,
+  validateAgentId,
+  validateUpdateAgentVoiceBody,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.updateAgentVoice
+);
+
+// PATCH /api/database/:subaccountId/agents/:agentId/llm - Update agent LLM model
+router.patch('/:subaccountId/agents/:agentId/llm',
+  validateSubaccountId,
+  validateAgentId,
+  validateUpdateAgentLLMBody,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.updateAgentLLM
 );
 
 // ========== CHAT AGENTS ROUTES ==========

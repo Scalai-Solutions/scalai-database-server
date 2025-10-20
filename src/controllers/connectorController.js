@@ -1655,16 +1655,20 @@ class ConnectorController {
         stack: error.stack,
         subaccountId: req.params.subaccountId,
         phoneNumber: req.params.phoneNumber,
-        response: error.response?.data
+        response: error.response?.data,
+        errorCode: error.code
       });
 
-      const statusCode = error.response?.status || 500;
+      // Use custom error codes and status codes if available
+      const statusCode = error.statusCode || error.response?.status || 500;
+      const errorCode = error.code || 'UPDATE_FAILED';
+      
       return res.status(statusCode).json({
         success: false,
-        message: 'Failed to update phone number',
+        message: error.message || 'Failed to update phone number',
         error: error.message,
         details: error.response?.data,
-        code: 'UPDATE_FAILED'
+        code: errorCode
       });
     }
   }

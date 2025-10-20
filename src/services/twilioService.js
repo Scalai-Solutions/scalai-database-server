@@ -1618,6 +1618,102 @@ class TwilioService {
         throw new Error('Retell API key not configured for this subaccount');
       }
 
+      // Get MongoDB connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+
+      // Validation: Check restrictions before updating
+      // Use Retell as the source of truth to avoid stale MongoDB data
+      const needsValidation = 
+        (updateData.inbound_agent_id !== undefined && updateData.inbound_agent_id !== null) ||
+        (updateData.outbound_agent_id !== undefined && updateData.outbound_agent_id !== null);
+
+      if (needsValidation) {
+        Logger.info('Validating phone number assignment against Retell', {
+          phoneNumber,
+          updateData
+        });
+
+        // Fetch all phone numbers from Retell (single API call for all validations)
+        const response = await axios.get('https://api.retellai.com/list-phone-numbers', {
+          headers: {
+            'Authorization': `Bearer ${retellApiKey}`
+          },
+          timeout: 30000
+        });
+        
+        const retellPhoneNumbers = response.data;
+        const currentPhone = retellPhoneNumbers.find(p => p.phone_number === phoneNumber);
+        
+        Logger.info('Current state in Retell', {
+          phoneNumber,
+          currentInbound: currentPhone?.inbound_agent_id,
+          currentOutbound: currentPhone?.outbound_agent_id,
+          totalPhoneNumbers: retellPhoneNumbers.length
+        });
+
+        // Validate inbound assignment
+        if (updateData.inbound_agent_id !== undefined && updateData.inbound_agent_id !== null) {
+          // Check if this agent already has another inbound number
+          const agentHasInbound = retellPhoneNumbers.find(p => 
+            p.inbound_agent_id === updateData.inbound_agent_id && 
+            p.phone_number !== phoneNumber
+          );
+
+          if (agentHasInbound) {
+            const error = new Error(
+              `This agent already has an inbound phone number assigned (${agentHasInbound.phone_number_pretty || agentHasInbound.phone_number}). Please remove the existing assignment first.`
+            );
+            error.statusCode = 400;
+            error.code = 'AGENT_INBOUND_LIMIT_REACHED';
+            throw error;
+          }
+
+          // Check if this phone number is currently assigned to another agent in Retell
+          if (currentPhone && 
+              currentPhone.inbound_agent_id && 
+              currentPhone.inbound_agent_id !== updateData.inbound_agent_id) {
+            const error = new Error(
+              `This phone number is currently assigned for inbound calls to another agent (${currentPhone.inbound_agent_id}). Please remove that assignment first.`
+            );
+            error.statusCode = 409;
+            error.code = 'PHONE_NUMBER_INBOUND_CONFLICT';
+            throw error;
+          }
+        }
+
+        // Validate outbound assignment
+        if (updateData.outbound_agent_id !== undefined && updateData.outbound_agent_id !== null) {
+          // Check if this agent already has another outbound number
+          const agentHasOutbound = retellPhoneNumbers.find(p => 
+            p.outbound_agent_id === updateData.outbound_agent_id && 
+            p.phone_number !== phoneNumber
+          );
+
+          if (agentHasOutbound) {
+            const error = new Error(
+              `This agent already has an outbound phone number assigned (${agentHasOutbound.phone_number_pretty || agentHasOutbound.phone_number}). Please remove the existing assignment first.`
+            );
+            error.statusCode = 400;
+            error.code = 'AGENT_OUTBOUND_LIMIT_REACHED';
+            throw error;
+          }
+
+          // Check if this phone number is currently assigned to another agent in Retell
+          if (currentPhone && 
+              currentPhone.outbound_agent_id && 
+              currentPhone.outbound_agent_id !== updateData.outbound_agent_id) {
+            const error = new Error(
+              `This phone number is currently assigned for outbound calls to another agent (${currentPhone.outbound_agent_id}). Please remove that assignment first.`
+            );
+            error.statusCode = 409;
+            error.code = 'PHONE_NUMBER_OUTBOUND_CONFLICT';
+            throw error;
+          }
+        }
+      }
+
       // Prepare Retell update payload
       const retellPayload = {};
       if (updateData.inbound_agent_id !== undefined) {
@@ -1629,6 +1725,12 @@ class TwilioService {
       if (updateData.nickname !== undefined) {
         retellPayload.nickname = updateData.nickname;
       }
+
+      Logger.info('Sending update to Retell', {
+        phoneNumber,
+        payload: retellPayload,
+        updateData
+      });
 
       // Update in Retell
       const response = await axios.patch(
@@ -1645,13 +1747,11 @@ class TwilioService {
 
       Logger.info('Successfully updated phone number in Retell', {
         phoneNumber,
-        response: response.data
+        requestPayload: retellPayload,
+        responseData: response.data
       });
 
-      // Update in MongoDB
-      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
-      const { connection } = connectionInfo;
-      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      // Update in MongoDB (reuse connection from validation)
 
       const mongoUpdateData = {
         updatedAt: new Date(),
@@ -1660,22 +1760,63 @@ class TwilioService {
 
       if (updateData.inbound_agent_id !== undefined) {
         mongoUpdateData.inbound_agent_id = updateData.inbound_agent_id;
-        mongoUpdateData.inbound_agent_version = response.data.inbound_agent_version;
+        // Only set version if agent is assigned (not null)
+        if (updateData.inbound_agent_id !== null && response.data.inbound_agent_version !== undefined) {
+          mongoUpdateData.inbound_agent_version = response.data.inbound_agent_version;
+        } else if (updateData.inbound_agent_id === null) {
+          // Explicitly set version to null when agent is removed
+          mongoUpdateData.inbound_agent_version = null;
+        }
       }
       if (updateData.outbound_agent_id !== undefined) {
         mongoUpdateData.outbound_agent_id = updateData.outbound_agent_id;
-        mongoUpdateData.outbound_agent_version = response.data.outbound_agent_version;
+        // Only set version if agent is assigned (not null)
+        if (updateData.outbound_agent_id !== null && response.data.outbound_agent_version !== undefined) {
+          mongoUpdateData.outbound_agent_version = response.data.outbound_agent_version;
+        } else if (updateData.outbound_agent_id === null) {
+          // Explicitly set version to null when agent is removed
+          mongoUpdateData.outbound_agent_version = null;
+        }
       }
       if (updateData.nickname !== undefined) {
         mongoUpdateData.nickname = updateData.nickname;
       }
 
-      await phoneNumbersCollection.updateOne(
+      Logger.info('Updating MongoDB with data', {
+        phoneNumber,
+        subaccountId,
+        mongoUpdateData,
+        updateFields: Object.keys(mongoUpdateData),
+        isSettingToNull: {
+          inbound: updateData.inbound_agent_id === null,
+          outbound: updateData.outbound_agent_id === null
+        }
+      });
+
+      // First, check current state in MongoDB
+      const currentDoc = await phoneNumbersCollection.findOne({
+        subaccountId,
+        phone_number: phoneNumber
+      });
+
+      Logger.info('Current MongoDB state before update', {
+        phoneNumber,
+        currentInbound: currentDoc?.inbound_agent_id,
+        currentOutbound: currentDoc?.outbound_agent_id
+      });
+
+      const updateResult = await phoneNumbersCollection.updateOne(
         { subaccountId, phone_number: phoneNumber },
         { $set: mongoUpdateData }
       );
 
-      Logger.info('Phone number updated in MongoDB', { phoneNumber, subaccountId });
+      Logger.info('Phone number updated in MongoDB successfully', {
+        phoneNumber,
+        subaccountId,
+        matchedCount: updateResult.matchedCount,
+        modifiedCount: updateResult.modifiedCount,
+        returnData: response.data
+      });
 
       return response.data;
     } catch (error) {

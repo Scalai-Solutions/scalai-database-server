@@ -1,6 +1,7 @@
 const Logger = require('../utils/logger');
 const retellService = require('../services/retellService');
 const connectionPoolManager = require('../services/connectionPoolManager');
+const redisService = require('../services/redisService');
 const Retell = require('../utils/retell');
 const { v4: uuidv4 } = require('uuid');
 const ActivityService = require('../services/activityService');
@@ -95,6 +96,22 @@ class CallController {
         agentId,
         callId: webCallResponse.call_id
       });
+
+      // Invalidate call logs cache
+      if (redisService.isConnected) {
+        try {
+          await redisService.invalidateCallLogs(subaccountId);
+          Logger.debug('Call logs cache invalidated after web call creation', {
+            operationId,
+            subaccountId
+          });
+        } catch (cacheError) {
+          Logger.warn('Failed to invalidate call logs cache', {
+            operationId,
+            error: cacheError.message
+          });
+        }
+      }
 
       // Log activity
       await ActivityService.logActivity({
@@ -203,6 +220,22 @@ class CallController {
         upsertedCount: result.upsertedCount,
         duration: `${duration}ms`
       });
+
+      // Invalidate call logs cache
+      if (redisService.isConnected) {
+        try {
+          await redisService.invalidateCallLogs(subaccountId);
+          Logger.debug('Call logs cache invalidated after webhook update', {
+            operationId,
+            subaccountId
+          });
+        } catch (cacheError) {
+          Logger.warn('Failed to invalidate call logs cache', {
+            operationId,
+            error: cacheError.message
+          });
+        }
+      }
 
       // Log activity
       await ActivityService.logActivity({
@@ -425,6 +458,22 @@ class CallController {
         callId: phoneCallResponse.call_id
       });
 
+      // Invalidate call logs cache
+      if (redisService.isConnected) {
+        try {
+          await redisService.invalidateCallLogs(subaccountId);
+          Logger.debug('Call logs cache invalidated after phone call creation', {
+            operationId,
+            subaccountId
+          });
+        } catch (cacheError) {
+          Logger.warn('Failed to invalidate call logs cache', {
+            operationId,
+            error: cacheError.message
+          });
+        }
+      }
+
       // Log activity
       await ActivityService.logActivity({
         subaccountId,
@@ -469,6 +518,516 @@ class CallController {
 
     } catch (error) {
       const errorInfo = await CallController.handleError(error, req, operationId, 'createPhoneCall', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
+   * Get call logs (list all calls)
+   * GET /api/calls/:subaccountId/logs
+   * POST /api/calls/:subaccountId/logs/filter (with filters and pagination)
+   */
+  static async getCallLogs(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId } = req.params;
+      const userId = req.user.id;
+
+      // Extract filter criteria and pagination from request body (POST) or query params (GET)
+      const filterCriteria = req.body?.filter_criteria || {};
+      const limit = req.body?.limit || req.query?.limit || 50;
+      const paginationKey = req.body?.pagination_key || req.query?.pagination_key;
+
+      Logger.info('Fetching call logs', {
+        operationId,
+        subaccountId,
+        userId,
+        hasFilters: Object.keys(filterCriteria).length > 0,
+        limit,
+        hasPaginationKey: !!paginationKey,
+        effectiveRole: req.permission?.effectiveRole
+      });
+
+      // Build cache key including filters and pagination for POST requests
+      const cacheKey = `call:logs:${subaccountId}`;
+      const shouldUseCache = !paginationKey && Object.keys(filterCriteria).length === 0 && limit === 50;
+
+      // Check cache first (only for simple queries without filters/pagination)
+      let callResponses = null;
+      let cacheHit = false;
+      
+      if (shouldUseCache && redisService.isConnected) {
+        try {
+          callResponses = await redisService.getCachedCallLogs(subaccountId);
+          if (callResponses) {
+            cacheHit = true;
+            Logger.debug('Call logs retrieved from cache', {
+              operationId,
+              subaccountId,
+              callCount: callResponses?.length || 0
+            });
+          }
+        } catch (cacheError) {
+          Logger.warn('Failed to get call logs from cache, fetching from Retell', {
+            operationId,
+            error: cacheError.message
+          });
+        }
+      }
+
+      // If not in cache, fetch from Retell
+      if (!callResponses) {
+        // Fetch retell account data (with caching)
+        const retellAccountData = await retellService.getRetellAccount(subaccountId);
+        
+        if (!retellAccountData.isActive) {
+          return res.status(400).json({
+            success: false,
+            message: 'Retell account is not active',
+            code: 'RETELL_ACCOUNT_INACTIVE'
+          });
+        }
+
+        // Create Retell instance with decrypted API key
+        const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+        
+        Logger.info('Retell instance created for listing calls', {
+          operationId,
+          accountName: retellAccountData.accountName,
+          accountId: retellAccountData.id
+        });
+
+        // Build options for Retell API
+        const listOptions = {};
+        if (Object.keys(filterCriteria).length > 0) {
+          listOptions.filter_criteria = filterCriteria;
+        }
+        if (limit) {
+          listOptions.limit = parseInt(limit);
+        }
+        if (paginationKey) {
+          listOptions.pagination_key = paginationKey;
+        }
+
+        // List all calls from Retell with filters and pagination
+        const retellCallResponses = await retell.listCalls(listOptions);
+
+        Logger.info('Call logs fetched successfully from Retell', {
+          operationId,
+          subaccountId,
+          callCount: retellCallResponses?.length || 0,
+          hasFilters: Object.keys(filterCriteria).length > 0
+        });
+
+        // Get database connection to filter by MongoDB presence
+        const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+        const { connection } = connectionInfo;
+        const callsCollection = connection.db.collection('calls');
+
+        // Get all call_ids that exist in MongoDB for this subaccount
+        const callIdsInMongo = await callsCollection
+          .find(
+            { subaccountId: subaccountId },
+            { projection: { call_id: 1, _id: 0 } }
+          )
+          .toArray();
+
+        const mongoCallIdSet = new Set(callIdsInMongo.map(doc => doc.call_id));
+
+        Logger.debug('MongoDB call_ids retrieved', {
+          operationId,
+          subaccountId,
+          mongoCallCount: mongoCallIdSet.size
+        });
+
+        // Filter Retell responses to only include calls present in MongoDB
+        callResponses = retellCallResponses.filter(call => mongoCallIdSet.has(call.call_id));
+
+        const filteredOutCount = retellCallResponses.length - callResponses.length;
+
+        Logger.info('Call logs filtered by MongoDB presence', {
+          operationId,
+          subaccountId,
+          retellCount: retellCallResponses.length,
+          mongoFilteredCount: callResponses.length,
+          filteredOut: filteredOutCount
+        });
+
+        // Cache the filtered results (only for simple queries)
+        if (shouldUseCache && redisService.isConnected) {
+          try {
+            await redisService.cacheCallLogs(subaccountId, callResponses, 300); // Cache for 5 minutes
+            Logger.debug('Call logs cached successfully', {
+              operationId,
+              subaccountId,
+              cachedCount: callResponses.length
+            });
+          } catch (cacheError) {
+            Logger.warn('Failed to cache call logs', {
+              operationId,
+              error: cacheError.message
+            });
+          }
+        }
+      }
+
+      // Get retell account data for response (needed even if cached)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+
+      // Determine next pagination key (last call_id in the response)
+      const nextPaginationKey = callResponses && callResponses.length > 0 
+        ? callResponses[callResponses.length - 1]?.call_id 
+        : null;
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.CALL_LOGS_VIEWED,
+        category: ACTIVITY_CATEGORIES.CALL,
+        userId,
+        description: `Call logs viewed (${callResponses?.length || 0} calls)`,
+        metadata: {
+          callCount: callResponses?.length || 0,
+          retellAccountId: retellAccountData.id,
+          cacheHit,
+          hasFilters: Object.keys(filterCriteria).length > 0,
+          limit,
+          filteredByMongoDB: true
+        },
+        resourceId: `call-logs-${subaccountId}`,
+        resourceName: 'Call Logs',
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      res.json({
+        success: true,
+        message: 'Call logs retrieved successfully (filtered by MongoDB presence)',
+        data: callResponses,
+        pagination: {
+          limit: parseInt(limit),
+          count: callResponses?.length || 0,
+          next_pagination_key: nextPaginationKey,
+          has_more: callResponses?.length === parseInt(limit)
+        },
+        retellAccount: {
+          accountName: retellAccountData.accountName,
+          accountId: retellAccountData.id
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cacheHit,
+          filteredByMongoDB: true
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await CallController.handleError(error, req, operationId, 'getCallLogs', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
+   * Delete a call log
+   * DELETE /api/calls/:subaccountId/logs/:callId
+   */
+  static async deleteCallLog(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, callId } = req.params;
+      const userId = req.user.id;
+
+      Logger.info('Deleting call log', {
+        operationId,
+        subaccountId,
+        userId,
+        callId,
+        effectiveRole: req.permission?.effectiveRole
+      });
+
+      // Fetch retell account data (with caching)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      // Create Retell instance with decrypted API key
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+      
+      Logger.info('Retell instance created for deleting call', {
+        operationId,
+        accountName: retellAccountData.accountName,
+        accountId: retellAccountData.id
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Check if call exists in our database
+      const callsCollection = connection.db.collection('calls');
+      const callDocument = await callsCollection.findOne({
+        call_id: callId,
+        subaccountId: subaccountId
+      });
+
+      // Delete call from Retell
+      await retell.deleteCall(callId);
+
+      // Delete call from our database if it exists
+      if (callDocument) {
+        await callsCollection.deleteOne({
+          call_id: callId,
+          subaccountId: subaccountId
+        });
+        
+        Logger.info('Call deleted from database', {
+          operationId,
+          subaccountId,
+          callId
+        });
+      }
+
+      Logger.info('Call log deleted successfully', {
+        operationId,
+        subaccountId,
+        callId
+      });
+
+      // Invalidate call logs cache
+      if (redisService.isConnected) {
+        try {
+          await redisService.invalidateCallLogs(subaccountId);
+          Logger.debug('Call logs cache invalidated after call deletion', {
+            operationId,
+            subaccountId
+          });
+        } catch (cacheError) {
+          Logger.warn('Failed to invalidate call logs cache', {
+            operationId,
+            error: cacheError.message
+          });
+        }
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.CALL_DELETED,
+        category: ACTIVITY_CATEGORIES.CALL,
+        userId,
+        description: `Call ${callId} deleted`,
+        metadata: {
+          callId,
+          retellAccountId: retellAccountData.id,
+          deletedFromDatabase: !!callDocument
+        },
+        resourceId: callId,
+        resourceName: `Call ${callId}`,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      res.json({
+        success: true,
+        message: 'Call log deleted successfully',
+        data: {
+          callId,
+          deletedFromRetell: true,
+          deletedFromDatabase: !!callDocument
+        },
+        retellAccount: {
+          accountName: retellAccountData.accountName,
+          accountId: retellAccountData.id
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await CallController.handleError(error, req, operationId, 'deleteCallLog', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
+   * Create a batch call (multiple outbound phone calls)
+   * POST /api/calls/:subaccountId/batch-call
+   */
+  static async createBatchCall(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId } = req.params;
+      const { from_number, tasks, name, trigger_timestamp, ignore_e164_validation } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('Creating batch call', {
+        operationId,
+        subaccountId,
+        userId,
+        from_number,
+        taskCount: tasks?.length || 0,
+        name,
+        effectiveRole: req.permission?.effectiveRole
+      });
+
+      // Fetch retell account data (with caching)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      // Create Retell instance with decrypted API key
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+      
+      Logger.info('Retell instance created for batch call', {
+        operationId,
+        accountName: retellAccountData.accountName,
+        accountId: retellAccountData.id
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Verify from_number exists in phonenumbers collection
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      const phoneNumberDocument = await phoneNumbersCollection.findOne({
+        subaccountId: subaccountId,
+        phone_number: from_number
+      });
+
+      if (!phoneNumberDocument) {
+        return res.status(404).json({
+          success: false,
+          message: `Phone number ${from_number} not found. Please add it to your account first.`,
+          code: 'PHONE_NUMBER_NOT_FOUND'
+        });
+      }
+
+      // Create batch call with Retell
+      const batchCallConfig = {
+        from_number,
+        tasks
+      };
+
+      if (name) {
+        batchCallConfig.name = name;
+      }
+      if (trigger_timestamp) {
+        batchCallConfig.trigger_timestamp = trigger_timestamp;
+      }
+      if (ignore_e164_validation !== undefined) {
+        batchCallConfig.ignore_e164_validation = ignore_e164_validation;
+      }
+
+      const batchCallResponse = await retell.createBatchCall(batchCallConfig);
+
+      // Store batch call information in database
+      const batchCallsCollection = connection.db.collection('batch_calls');
+      const batchCallDocument = {
+        batch_call_id: batchCallResponse.batch_call_id,
+        name: batchCallResponse.name || name,
+        from_number: batchCallResponse.from_number,
+        scheduled_timestamp: batchCallResponse.scheduled_timestamp,
+        total_task_count: batchCallResponse.total_task_count,
+        tasks: tasks,
+        subaccountId: subaccountId,
+        createdBy: userId,
+        createdAt: new Date(),
+        operationId: operationId,
+        retellAccountId: retellAccountData.id
+      };
+
+      await batchCallsCollection.insertOne(batchCallDocument);
+      
+      Logger.info('Batch call created and stored in database', {
+        operationId,
+        subaccountId,
+        batchCallId: batchCallResponse.batch_call_id,
+        taskCount: batchCallResponse.total_task_count
+      });
+
+      // Invalidate call logs cache (batch calls will eventually create individual calls)
+      if (redisService.isConnected) {
+        try {
+          await redisService.invalidateCallLogs(subaccountId);
+          Logger.debug('Call logs cache invalidated after batch call creation', {
+            operationId,
+            subaccountId
+          });
+        } catch (cacheError) {
+          Logger.warn('Failed to invalidate call logs cache', {
+            operationId,
+            error: cacheError.message
+          });
+        }
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.PHONE_CALL_CREATED,
+        category: ACTIVITY_CATEGORIES.CALL,
+        userId,
+        description: `Batch call created with ${batchCallResponse.total_task_count} tasks from ${from_number}`,
+        metadata: {
+          batchCallId: batchCallResponse.batch_call_id,
+          from_number,
+          taskCount: batchCallResponse.total_task_count,
+          name: batchCallResponse.name,
+          scheduled: !!trigger_timestamp
+        },
+        resourceId: batchCallResponse.batch_call_id,
+        resourceName: `Batch Call - ${batchCallResponse.name || 'Unnamed'}`,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      return res.status(200).json({
+        success: true,
+        message: 'Batch call created successfully',
+        data: {
+          batch_call_id: batchCallResponse.batch_call_id,
+          name: batchCallResponse.name,
+          from_number: batchCallResponse.from_number,
+          scheduled_timestamp: batchCallResponse.scheduled_timestamp,
+          total_task_count: batchCallResponse.total_task_count
+        },
+        retellAccount: {
+          accountName: retellAccountData.accountName,
+          accountId: retellAccountData.id
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await CallController.handleError(error, req, operationId, 'createBatchCall', startTime);
       return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }

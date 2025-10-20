@@ -122,6 +122,43 @@ class Retell {
   }
 
   /**
+   * Update an LLM model
+   * @param {string} llmId - The LLM ID to update
+   * @param {Object} updates - The fields to update (e.g., {model: 'gpt-4o'})
+   * @returns {Promise<Object>} The updated LLM object
+   */
+  async updateLLM(llmId, updates) {
+    try {
+      Logger.info('Updating LLM model', {
+        llmId,
+        updates,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const updatedLLM = await this.client.llm.update(llmId, updates);
+      
+      Logger.info('LLM updated successfully', {
+        llmId,
+        model: updatedLLM.model,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return updatedLLM;
+    } catch (error) {
+      Logger.error('Failed to update LLM', {
+        llmId,
+        updates,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to update LLM: ${error.message}`);
+    }
+  }
+
+  /**
    * Create a new agent with the provided configuration
    * @param {Object} agentConfig - Agent configuration object
    * @returns {Promise<Object>} The created agent object
@@ -363,6 +400,50 @@ class Retell {
   }
 
   /**
+   * Create a batch call (multiple outbound calls)
+   * @param {Object} batchConfig - Batch call configuration
+   * @param {string} batchConfig.from_number - Phone number to call from
+   * @param {Array} batchConfig.tasks - Array of call tasks with to_number and optional dynamic_variables
+   * @param {string} batchConfig.name - Name of the batch call (optional)
+   * @param {number} batchConfig.trigger_timestamp - Scheduled timestamp in milliseconds (optional)
+   * @param {boolean} batchConfig.ignore_e164_validation - Ignore E.164 validation (optional)
+   * @returns {Promise<Object>} The batch call response with batch_call_id
+   */
+  async createBatchCall(batchConfig) {
+    try {
+      Logger.info('Creating batch call', {
+        from_number: batchConfig.from_number,
+        taskCount: batchConfig.tasks?.length || 0,
+        name: batchConfig.name,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const batchCallResponse = await this.client.batchCall.createBatchCall(batchConfig);
+      
+      Logger.info('Batch call created successfully', {
+        batch_call_id: batchCallResponse.batch_call_id,
+        from_number: batchConfig.from_number,
+        totalTaskCount: batchCallResponse.total_task_count,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return batchCallResponse;
+    } catch (error) {
+      Logger.error('Failed to create batch call', {
+        from_number: batchConfig.from_number,
+        taskCount: batchConfig.tasks?.length || 0,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message,
+        stack: error.stack
+      });
+      throw new Error(`Failed to create batch call: ${error.message}`);
+    }
+  }
+
+  /**
    * Create a new chat with an agent
    * @param {string} agentId - The agent ID to use for the chat
    * @returns {Promise<Object>} The chat response with chat_id, agent_id, etc.
@@ -528,6 +609,378 @@ class Retell {
         error: error.message
       });
       throw new Error(`Failed to retrieve chat: ${error.message}`);
+    }
+  }
+
+  /**
+   * List all calls (call logs)
+   * @param {Object} options - Optional filter parameters
+   * @param {Object} options.filter_criteria - Filter criteria for calls
+   * @param {number} options.limit - Maximum number of calls to return (default 50, max 1000)
+   * @param {string} options.pagination_key - Pagination key for next page
+   * @returns {Promise<Array>} Array of call objects
+   */
+  async listCalls(options = {}) {
+    try {
+      Logger.info('Listing calls', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        hasFilters: !!options.filter_criteria,
+        limit: options.limit,
+        hasPaginationKey: !!options.pagination_key
+      });
+
+      const callResponses = await this.client.call.list(options);
+      
+      Logger.info('Calls listed successfully', {
+        count: callResponses?.length || 0,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return callResponses;
+    } catch (error) {
+      Logger.error('Failed to list calls', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to list calls: ${error.message}`);
+    }
+  }
+
+  /**
+   * List all available voices
+   * @returns {Promise<Array>} Array of voice objects
+   */
+  async listVoices() {
+    try {
+      Logger.info('Listing voices', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const voices = await this.client.voice.list();
+      
+      Logger.info('Voices listed successfully', {
+        count: voices?.length || 0,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return voices;
+    } catch (error) {
+      Logger.error('Failed to list voices', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to list voices: ${error.message}`);
+    }
+  }
+
+  /**
+   * Delete a call by ID
+   * @param {string} callId - The call ID to delete
+   * @returns {Promise<void>}
+   */
+  async deleteCall(callId) {
+    try {
+      Logger.info('Deleting call', {
+        callId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      await this.client.call.delete(callId);
+      
+      Logger.info('Call deleted successfully', {
+        callId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+    } catch (error) {
+      Logger.error('Failed to delete call', {
+        callId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to delete call: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create a knowledge base
+   * @param {Object} config - Knowledge base configuration
+   * @param {string} config.knowledge_base_name - Name of the knowledge base
+   * @param {Array} config.knowledge_base_texts - Text sources (optional)
+   * @param {Array} config.knowledge_base_urls - URL sources (optional)
+   * @param {Array} config.knowledge_base_files - File sources (optional)
+   * @param {boolean} config.enable_auto_refresh - Enable auto refresh for URLs (optional)
+   * @returns {Promise<Object>} The created knowledge base
+   */
+  async createKnowledgeBase(config) {
+    try {
+      Logger.info('Creating knowledge base', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        knowledgeBaseName: config.knowledge_base_name,
+        hasTexts: !!config.knowledge_base_texts && config.knowledge_base_texts.length > 0,
+        hasUrls: !!config.knowledge_base_urls && config.knowledge_base_urls.length > 0,
+        hasFiles: !!config.knowledge_base_files && config.knowledge_base_files.length > 0,
+        textsCount: config.knowledge_base_texts?.length || 0,
+        urlsCount: config.knowledge_base_urls?.length || 0,
+        filesCount: config.knowledge_base_files?.length || 0
+      });
+
+      const kbResponse = await this.client.knowledgeBase.create(config);
+      
+      Logger.info('Knowledge base created successfully', {
+        knowledgeBaseId: kbResponse.knowledge_base_id,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        sourcesCreated: kbResponse.knowledge_base_sources?.length || 0
+      });
+
+      return kbResponse;
+    } catch (error) {
+      console.log(error);
+      Logger.error('Failed to create knowledge base', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message,
+        stack: error.stack
+      });
+      throw new Error(`Failed to create knowledge base: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get a knowledge base by ID
+   * @param {string} knowledgeBaseId - The knowledge base ID
+   * @returns {Promise<Object>} The knowledge base details
+   */
+  async getKnowledgeBase(knowledgeBaseId) {
+    try {
+      Logger.info('Getting knowledge base', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const kbResponse = await this.client.knowledgeBase.retrieve(knowledgeBaseId);
+      
+      Logger.info('Knowledge base retrieved successfully', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        status: kbResponse.status,
+        sourcesCount: kbResponse.knowledge_base_sources?.length || 0
+      });
+
+      return kbResponse;
+    } catch (error) {
+      Logger.error('Failed to get knowledge base', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to get knowledge base: ${error.message}`);
+    }
+  }
+
+  /**
+   * Wait for knowledge base to be ready (status: completed)
+   * @param {string} knowledgeBaseId - The knowledge base ID
+   * @param {number} maxWaitTime - Maximum wait time in ms (default: 60000 = 1 minute)
+   * @param {number} pollInterval - Poll interval in ms (default: 2000 = 2 seconds)
+   * @returns {Promise<Object>} The completed knowledge base details
+   */
+  async waitForKnowledgeBaseReady(knowledgeBaseId, maxWaitTime = 60000, pollInterval = 2000) {
+    const startTime = Date.now();
+    
+    Logger.info('Waiting for knowledge base to be ready', {
+      knowledgeBaseId,
+      accountName: this.accountName,
+      subaccountId: this.subaccountId,
+      maxWaitTime: `${maxWaitTime}ms`,
+      pollInterval: `${pollInterval}ms`
+    });
+
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        const kbResponse = await this.getKnowledgeBase(knowledgeBaseId);
+        
+        Logger.debug('KB status check', {
+          knowledgeBaseId,
+          status: kbResponse.status,
+          sourcesCount: kbResponse.knowledge_base_sources?.length || 0,
+          elapsed: `${Date.now() - startTime}ms`
+        });
+
+        if (kbResponse.status === 'complete') {
+          Logger.info('Knowledge base is ready', {
+            knowledgeBaseId,
+            accountName: this.accountName,
+            subaccountId: this.subaccountId,
+            sourcesCount: kbResponse.knowledge_base_sources?.length || 0,
+            waitTime: `${Date.now() - startTime}ms`
+          });
+          return kbResponse;
+        }
+
+        if (kbResponse.status === 'failed' || kbResponse.status === 'error') {
+          throw new Error(`Knowledge base processing failed with status: ${kbResponse.status}`);
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      } catch (error) {
+        Logger.error('Error while waiting for KB', {
+          knowledgeBaseId,
+          error: error.message,
+          elapsed: `${Date.now() - startTime}ms`
+        });
+        throw error;
+      }
+    }
+
+    // Timeout reached
+    throw new Error(`Knowledge base processing timed out after ${maxWaitTime}ms`);
+  }
+
+  /**
+   * List all knowledge bases
+   * @returns {Promise<Array>} Array of knowledge bases
+   */
+  async listKnowledgeBases() {
+    try {
+      Logger.info('Listing knowledge bases', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const kbList = await this.client.knowledgeBase.list();
+      
+      Logger.info('Knowledge bases listed successfully', {
+        count: kbList?.length || 0,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return kbList;
+    } catch (error) {
+      Logger.error('Failed to list knowledge bases', {
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to list knowledge bases: ${error.message}`);
+    }
+  }
+
+  /**
+   * Delete a knowledge base
+   * @param {string} knowledgeBaseId - The knowledge base ID to delete
+   * @returns {Promise<void>}
+   */
+  async deleteKnowledgeBase(knowledgeBaseId) {
+    try {
+      Logger.info('Deleting knowledge base', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      await this.client.knowledgeBase.delete(knowledgeBaseId);
+      
+      Logger.info('Knowledge base deleted successfully', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+    } catch (error) {
+      Logger.error('Failed to delete knowledge base', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to delete knowledge base: ${error.message}`);
+    }
+  }
+
+  /**
+   * Add sources to a knowledge base
+   * @param {string} knowledgeBaseId - The knowledge base ID
+   * @param {Object} sources - Sources to add
+   * @param {Array} sources.knowledge_base_texts - Text sources (optional)
+   * @param {Array} sources.knowledge_base_urls - URL sources (optional)
+   * @param {Array} sources.knowledge_base_files - File sources (optional)
+   * @returns {Promise<Object>} Updated knowledge base
+   */
+  async addKnowledgeBaseSources(knowledgeBaseId, sources) {
+    try {
+      Logger.info('Adding sources to knowledge base', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const kbResponse = await this.client.knowledgeBase.addSources(knowledgeBaseId, sources);
+      
+      Logger.info('Sources added to knowledge base successfully', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return kbResponse;
+    } catch (error) {
+      Logger.error('Failed to add sources to knowledge base', {
+        knowledgeBaseId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to add sources to knowledge base: ${error.message}`);
+    }
+  }
+
+  /**
+   * Delete a source from a knowledge base
+   * @param {string} knowledgeBaseId - The knowledge base ID
+   * @param {string} sourceId - The source ID to delete
+   * @returns {Promise<void>}
+   */
+  async deleteKnowledgeBaseSource(knowledgeBaseId, sourceId) {
+    try {
+      Logger.info('Deleting source from knowledge base', {
+        knowledgeBaseId,
+        sourceId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      await this.client.knowledgeBase.deleteSource(knowledgeBaseId, sourceId);
+      
+      Logger.info('Source deleted from knowledge base successfully', {
+        knowledgeBaseId,
+        sourceId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+    } catch (error) {
+      Logger.error('Failed to delete source from knowledge base', {
+        knowledgeBaseId,
+        sourceId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to delete source from knowledge base: ${error.message}`);
     }
   }
 

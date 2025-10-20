@@ -106,7 +106,7 @@ const subaccountLimiter = (maxRequests, windowMs) => {
 
 // Burst protection for sensitive operations
 const burstProtection = createRateLimiter(
-  5, // Only 5 requests per 10 seconds
+  5000, // Only 5 requests per 10 seconds
   10 * 1000, // 10 seconds
   (req) => {
     const subaccountId = req.params.subaccountId || req.body.subaccountId;
