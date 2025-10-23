@@ -7,6 +7,7 @@ const config = require('../config/config');
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
 const { generalLimiter } = require('./middleware/rateLimiter');
+const mockSessionMiddleware = require('./middleware/mockSessionMiddleware');
 // console.log("Importing healthRoutes");
 // Import routes
 const healthRoutes = require('./routes/healthRoutes');
@@ -19,6 +20,7 @@ const homeRoutes = require('./routes/homeRoutes');
 const activityRoutes = require('./routes/activityRoutes');
 const aiInsightsRoutes = require('./routes/aiInsightsRoutes');
 const knowledgeBaseRoutes = require('./routes/knowledgeBaseRoutes');
+const mockSessionRoutes = require('./routes/mockSessionRoutes');
 
 const app = express();
 
@@ -49,6 +51,10 @@ app.use(generalLimiter);
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Mock session detection middleware
+app.use(mockSessionMiddleware);
+
 // Routes
 app.use('/api/health', healthRoutes);
 // Temporarily disable database routes to test
@@ -62,6 +68,7 @@ app.use('/api/home', homeRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/ai-insights', aiInsightsRoutes);
 app.use('/api/knowledge-base', knowledgeBaseRoutes);
+app.use('/api/mock-sessions', mockSessionRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -80,7 +87,8 @@ app.get('/', (req, res) => {
       home: '/api/home',
       activities: '/api/activities',
       aiInsights: '/api/ai-insights',
-      knowledgeBase: '/api/knowledge-base'
+      knowledgeBase: '/api/knowledge-base',
+      mockSessions: '/api/mock-sessions'
     }
   });
 });

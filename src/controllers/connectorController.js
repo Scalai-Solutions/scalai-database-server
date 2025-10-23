@@ -1566,18 +1566,6 @@ class ConnectorController {
 
       const phoneNumbers = await twilioService.getAllPhoneNumbers(subaccountId, userId);
 
-      // Log activity
-      await ActivityService.logActivity({
-        subaccountId,
-        activityType: ACTIVITY_TYPES.CONNECTOR_LIST_PHONE_NUMBERS,
-        category: ACTIVITY_CATEGORIES.CONNECTOR,
-        userId,
-        description: `Retrieved ${phoneNumbers.length} phone numbers`,
-        metadata: {
-          count: phoneNumbers.length
-        }
-      });
-
       return res.status(200).json({
         success: true,
         data: phoneNumbers,

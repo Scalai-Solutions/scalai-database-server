@@ -6,6 +6,7 @@ const Retell = require('../utils/retell');
 const { v4: uuidv4 } = require('uuid');
 const ActivityService = require('../services/activityService');
 const { ACTIVITY_TYPES, ACTIVITY_CATEGORIES } = ActivityService;
+const { getStorageFromRequest } = require('../services/storageManager');
 
 class CallController {
   /**
@@ -26,7 +27,9 @@ class CallController {
         subaccountId,
         userId,
         agentId,
-        effectiveRole: req.permission?.effectiveRole
+        effectiveRole: req.permission?.effectiveRole,
+        isMockSession: req.mockSession?.isMock || false,
+        mockSessionId: req.mockSession?.sessionId
       });
 
       // Fetch retell account data (with caching)
@@ -49,11 +52,11 @@ class CallController {
         accountId: retellAccountData.id
       });
 
-      // Verify agent exists in database
-      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
-      const { connection } = connectionInfo;
+      // Always get agents from MongoDB (agents are shared resources, not mock-specific)
+      const agentConnectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const agentsCollection = agentConnectionInfo.connection.db.collection('agents');
       
-      const agentsCollection = connection.db.collection('agents');
+      // Verify agent exists in MongoDB
       const agentDocument = await agentsCollection.findOne({ 
         agentId: agentId,
         subaccountId: subaccountId 
@@ -67,12 +70,22 @@ class CallController {
         });
       }
 
-      // Create web call with optional metadata
-      const callOptions = metadata ? { metadata } : {};
+      // Enhance metadata with mock session info
+      const enhancedMetadata = {
+        ...metadata,
+        isMockSession: req.mockSession?.isMock || false,
+        mockSessionId: req.mockSession?.sessionId || null,
+        subaccountId: subaccountId
+      };
+
+      // Create web call with enhanced metadata
+      const callOptions = { metadata: enhancedMetadata };
       const webCallResponse = await retell.createWebCall(agentId, callOptions);
 
-      // Store call information in database
-      const callsCollection = connection.db.collection('calls');
+      // Get storage for CALLS only (MongoDB or Mock based on session)
+      const storage = await getStorageFromRequest(req, subaccountId, userId);
+      const callsCollection = await storage.getCollection('calls');
+      const now = new Date();
       const callDocument = {
         call_id: webCallResponse.call_id,
         agent_id: agentId,
@@ -80,21 +93,26 @@ class CallController {
         access_token: webCallResponse.access_token,
         sample_rate: webCallResponse.sample_rate,
         call_status: webCallResponse.call_status || 'registered',
-        metadata: metadata || {},
+        start_timestamp: now.getTime(), // Add timestamp for filtering
+        metadata: enhancedMetadata,
         subaccountId: subaccountId,
         createdBy: userId,
-        createdAt: new Date(),
+        createdAt: now,
         operationId: operationId,
-        retellAccountId: retellAccountData.id
+        retellAccountId: retellAccountData.id,
+        _isMockSession: req.mockSession?.isMock || false,
+        _mockSessionId: req.mockSession?.sessionId || null
       };
 
       await callsCollection.insertOne(callDocument);
       
-      Logger.info('Web call created and stored in database', {
+      Logger.info('Web call created and stored', {
         operationId,
         subaccountId,
         agentId,
-        callId: webCallResponse.call_id
+        callId: webCallResponse.call_id,
+        isMockSession: req.mockSession?.isMock || false,
+        storageType: storage.isMock ? 'Redis (Mock)' : 'MongoDB'
       });
 
       // Invalidate call logs cache
@@ -178,7 +196,8 @@ class CallController {
         subaccountId,
         callId,
         serviceName,
-        updateFields: Object.keys(updateData || {})
+        updateFields: Object.keys(updateData || {}),
+        isMockSession: req.mockSession?.isMock || false
       });
 
       if (!callId || !updateData) {
@@ -189,11 +208,9 @@ class CallController {
         });
       }
 
-      // Get database connection
-      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, 'webhook-service');
-      const { connection } = connectionInfo;
-      
-      const callsCollection = connection.db.collection('calls');
+      // Get storage (MongoDB or Mock based on session)
+      const storage = await getStorageFromRequest(req, subaccountId, 'webhook-service');
+      const callsCollection = await storage.getCollection('calls');
 
       // Upsert the call document
       const result = await callsCollection.updateOne(
@@ -353,7 +370,8 @@ class CallController {
         to_number,
         agent_id,
         dynamic_variables: dynamicVars,
-        effectiveRole: req.permission?.effectiveRole
+        effectiveRole: req.permission?.effectiveRole,
+        isMockSession: req.mockSession?.isMock || false
       });
 
       // Fetch retell account data (with caching)
@@ -376,13 +394,12 @@ class CallController {
         accountId: retellAccountData.id
       });
 
-      // Get database connection
+      // Always get agents and phone numbers from MongoDB (shared resources)
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
-      const { connection } = connectionInfo;
 
-      // If agent_id is provided, verify agent exists in database
+      // If agent_id is provided, verify agent exists in MongoDB
       if (agent_id) {
-        const agentsCollection = connection.db.collection('agents');
+        const agentsCollection = connectionInfo.connection.db.collection('agents');
         const agentDocument = await agentsCollection.findOne({ 
           agentId: agent_id,
           subaccountId: subaccountId 
@@ -397,8 +414,8 @@ class CallController {
         }
       }
 
-      // Verify from_number exists in phonenumbers collection
-      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      // Verify from_number exists in phonenumbers collection (MongoDB)
+      const phoneNumbersCollection = connectionInfo.connection.db.collection('phonenumbers');
       const phoneNumberDocument = await phoneNumbersCollection.findOne({
         subaccountId: subaccountId,
         phone_number: from_number
@@ -412,17 +429,23 @@ class CallController {
         });
       }
 
+      // Enhance metadata with mock session info
+      const enhancedMetadata = {
+        ...metadata,
+        isMockSession: req.mockSession?.isMock || false,
+        mockSessionId: req.mockSession?.sessionId || null,
+        subaccountId: subaccountId
+      };
+
       // Create phone call with Retell
       const callConfig = {
         from_number,
-        to_number
+        to_number,
+        metadata: enhancedMetadata
       };
 
       if (agent_id) {
         callConfig.agent_id = agent_id;
-      }
-      if (metadata) {
-        callConfig.metadata = metadata;
       }
       if (dynamicVars) {
         callConfig.retell_llm_dynamic_variables = dynamicVars;
@@ -430,8 +453,10 @@ class CallController {
 
       const phoneCallResponse = await retell.createPhoneCall(callConfig);
 
-      // Store call information in database
-      const callsCollection = connection.db.collection('calls');
+      // Get storage for CALLS only (MongoDB or Mock based on session)
+      const storage = await getStorageFromRequest(req, subaccountId, userId);
+      const callsCollection = await storage.getCollection('calls');
+      const now = new Date();
       const callDocument = {
         call_id: phoneCallResponse.call_id,
         agent_id: phoneCallResponse.agent_id || agent_id,
@@ -439,23 +464,28 @@ class CallController {
         from_number: from_number,
         to_number: to_number,
         call_status: phoneCallResponse.call_status || 'registered',
-        metadata: metadata || {},
+        start_timestamp: now.getTime(), // Add timestamp for filtering
+        metadata: enhancedMetadata,
         retell_llm_dynamic_variables: dynamicVars || null,
         subaccountId: subaccountId,
         createdBy: userId,
-        createdAt: new Date(),
+        createdAt: now,
         operationId: operationId,
-        retellAccountId: retellAccountData.id
+        retellAccountId: retellAccountData.id,
+        _isMockSession: req.mockSession?.isMock || false,
+        _mockSessionId: req.mockSession?.sessionId || null
       };
 
       await callsCollection.insertOne(callDocument);
       
-      Logger.info('Phone call created and stored in database', {
+      Logger.info('Phone call created and stored', {
         operationId,
         subaccountId,
         from_number,
         to_number,
-        callId: phoneCallResponse.call_id
+        callId: phoneCallResponse.call_id,
+        isMockSession: req.mockSession?.isMock || false,
+        storageType: storage.isMock ? 'Redis (Mock)' : 'MongoDB'
       });
 
       // Invalidate call logs cache
@@ -547,9 +577,126 @@ class CallController {
         hasFilters: Object.keys(filterCriteria).length > 0,
         limit,
         hasPaginationKey: !!paginationKey,
-        effectiveRole: req.permission?.effectiveRole
+        effectiveRole: req.permission?.effectiveRole,
+        isMockSession: req.mockSession?.isMock || false
       });
 
+      // For MOCK sessions, fetch from storage layer (Redis + MongoDB)
+      if (req.mockSession?.isMock && req.mockSession?.sessionId) {
+        Logger.info('🎭 Fetching call logs from mock storage (Redis + MongoDB)', {
+          operationId,
+          subaccountId,
+          mockSessionId: req.mockSession.sessionId
+        });
+
+        // Get storage (will return hybrid Redis + MongoDB)
+        const storage = await getStorageFromRequest(req, subaccountId, userId);
+        const callsCollection = await storage.getCollection('calls');
+
+        // Build query using agent_id from filters (since subaccountId might be null in MongoDB)
+        // We'll filter by subaccountId in-memory
+        const query = {};
+        
+        // If agent_id filter is provided, use it in the query
+        if (filterCriteria.agent_id && Array.isArray(filterCriteria.agent_id)) {
+          query.agent_id = { $in: filterCriteria.agent_id };
+        }
+
+        // Fetch calls from hybrid storage
+        // Sort by start_timestamp (not createdAt) to match Retell API behavior
+        let calls = await callsCollection
+          .find(query)
+          .sort({ start_timestamp: -1 })
+          .toArray();
+        
+        // Filter by subaccountId in-memory (since MongoDB calls might have null subaccountId)
+        // In non-mock mode, Retell API returns pre-filtered calls
+        // But in mock mode, we need to check both the subaccountId field and rely on agent ownership
+        calls = calls.filter(call => {
+          // Accept if subaccountId matches
+          if (call.subaccountId === subaccountId) return true;
+          
+          // Also accept calls from MongoDB that don't have subaccountId set
+          // (legacy/webhook calls) as long as agent_id matches our query
+          if (!call.subaccountId && !call._mockSession) return true;
+          
+          return false;
+        });
+
+        Logger.debug('🎭 Mock hybrid fetch results', {
+          operationId,
+          subaccountId,
+          totalCalls: calls.length,
+          mockCalls: calls.filter(c => c._mockSession).length,
+          mongoCalls: calls.filter(c => !c._mockSession).length
+        });
+
+        // Apply remaining filters in-memory
+        if (filterCriteria.call_type) {
+          calls = calls.filter(call => call.call_type === filterCriteria.call_type);
+        }
+        if (filterCriteria.call_status && Array.isArray(filterCriteria.call_status)) {
+          calls = calls.filter(call => filterCriteria.call_status.includes(call.call_status));
+        }
+        if (filterCriteria.start_timestamp) {
+          calls = calls.filter(call => {
+            const timestamp = call.start_timestamp;
+            if (!timestamp) return false;
+            if (filterCriteria.start_timestamp.lower && timestamp < filterCriteria.start_timestamp.lower) {
+              return false;
+            }
+            if (filterCriteria.start_timestamp.upper && timestamp > filterCriteria.start_timestamp.upper) {
+              return false;
+            }
+            return true;
+          });
+        }
+
+        // Apply limit
+        calls = calls.slice(0, parseInt(limit));
+
+        // Calculate duration for calls that have timestamps but no duration
+        const callsWithDuration = calls.map(call => {
+          // If duration_ms already exists, keep it
+          if (call.duration_ms) {
+            return call;
+          }
+          
+          // Calculate duration from timestamps if available
+          if (call.start_timestamp && call.end_timestamp) {
+            return {
+              ...call,
+              duration_ms: call.end_timestamp - call.start_timestamp
+            };
+          }
+          
+          return call;
+        });
+
+        Logger.info('Call logs fetched from mock storage', {
+          operationId,
+          subaccountId,
+          callCount: callsWithDuration.length,
+          mockCallsIncluded: true
+        });
+
+        const duration = Date.now() - startTime;
+
+        return res.json({
+          success: true,
+          message: 'Call logs retrieved successfully (mock mode)',
+          data: callsWithDuration,
+          meta: {
+            operationId,
+            duration: `${duration}ms`,
+            count: callsWithDuration.length,
+            isMockSession: true,
+            source: 'Redis + MongoDB'
+          }
+        });
+      }
+
+      // For REGULAR sessions, use Retell API (existing logic)
       // Build cache key including filters and pagination for POST requests
       const cacheKey = `call:logs:${subaccountId}`;
       const shouldUseCache = !paginationKey && Object.keys(filterCriteria).length === 0 && limit === 50;

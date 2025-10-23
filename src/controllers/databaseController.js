@@ -8,6 +8,7 @@ const Retell = require('../utils/retell');
 const { v4: uuidv4 } = require('uuid');
 const ActivityService = require('../services/activityService');
 const { ACTIVITY_TYPES, ACTIVITY_CATEGORIES } = ActivityService;
+const { getStorageFromRequest } = require('../services/storageManager');
 
 class DatabaseController {
   // Create agent
@@ -671,10 +672,81 @@ After appointment is booked:
       Logger.info('Fetching agents with statistics', {
         operationId,
         subaccountId,
-        userId
+        userId,
+        isMockSession: req.mockSession?.isMock || false
       });
 
-      // Get database connection
+      // For MOCK sessions, use hybrid storage for calls
+      if (req.mockSession?.isMock && req.mockSession?.sessionId) {
+        Logger.info('🎭 Fetching agents with hybrid call statistics', {
+          operationId,
+          subaccountId,
+          mockSessionId: req.mockSession.sessionId
+        });
+
+        // Get agents from MongoDB (agents are shared)
+        const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+        const agentsCollection = connectionInfo.connection.db.collection('agents');
+        
+        const agents = await agentsCollection.find({ subaccountId: subaccountId }).toArray();
+
+        // Get calls from hybrid storage
+        const storage = await getStorageFromRequest(req, subaccountId, userId);
+        const callsCollection = await storage.getCollection('calls');
+        const allCalls = await callsCollection.find({}).toArray();
+
+        // Calculate statistics for each agent using hybrid call data
+        const agentsWithStats = agents.map(agent => {
+          const agentCalls = allCalls.filter(call => call.agent_id === agent.agentId);
+          const numberOfCalls = agentCalls.length;
+          
+          let cumulativeSuccessRate = 0;
+          if (numberOfCalls > 0) {
+            const totalSuccessScore = agentCalls.reduce((sum, call) => {
+              return sum + (call.success_score || 0);
+            }, 0);
+            cumulativeSuccessRate = (totalSuccessScore / numberOfCalls) * 100;
+          }
+
+          return {
+            agentId: agent.agentId,
+            name: agent.name,
+            description: agent.description,
+            voiceId: agent.voiceId,
+            language: agent.language,
+            createdAt: agent.createdAt,
+            numberOfCalls,
+            cumulativeSuccessRate
+          };
+        }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        const duration = Date.now() - startTime;
+
+        Logger.info('Agents fetched with hybrid statistics', {
+          operationId,
+          subaccountId,
+          agentCount: agentsWithStats.length,
+          totalCalls: allCalls.length,
+          duration: `${duration}ms`
+        });
+
+        return res.json({
+          success: true,
+          message: 'Agents retrieved successfully (mock mode)',
+          data: {
+            agents: agentsWithStats,
+            count: agentsWithStats.length
+          },
+          meta: {
+            operationId,
+            duration: `${duration}ms`,
+            isMockSession: true,
+            source: 'Redis + MongoDB'
+          }
+        });
+      }
+
+      // For REGULAR sessions, use standard MongoDB aggregation
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
       const { connection } = connectionInfo;
 
@@ -948,6 +1020,40 @@ After appointment is booked:
     }
   }
 
+  // Helper function to calculate period stats manually (for mock sessions)
+  static calculatePeriodStats(calls) {
+    const totalCalls = calls.length;
+    
+    if (totalCalls === 0) {
+      return {
+        totalCalls: 0,
+        unresponsiveCalls: 0,
+        cumulativeSuccessRate: 0
+      };
+    }
+
+    // Count unresponsive calls
+    const unresponsiveCalls = calls.filter(call => {
+      const reason = call.disconnection_reason;
+      if (!reason || reason === '' || reason === null) return true;
+      if (typeof reason === 'string' && !reason.toLowerCase().includes('hangup')) return true;
+      return false;
+    }).length;
+
+    // Calculate cumulative success rate
+    const callsWithScores = calls.filter(call => call.success_score && call.success_score > 0);
+    const totalSuccessScore = callsWithScores.reduce((sum, call) => sum + (call.success_score || 0), 0);
+    const cumulativeSuccessRate = callsWithScores.length > 0 
+      ? (totalSuccessScore / callsWithScores.length) * 100 
+      : 0;
+
+    return {
+      totalCalls,
+      unresponsiveCalls,
+      cumulativeSuccessRate
+    };
+  }
+
   // Get detailed agent statistics with period comparison
   static async getAgentDetails(req, res, next) {
     const startTime = Date.now();
@@ -1015,47 +1121,48 @@ After appointment is booked:
         currentPeriodStart: currentPeriodStart.toISOString(),
         currentPeriodEnd: currentPeriodEnd.toISOString(),
         previousPeriodStart: previousPeriodStart.toISOString(),
-        previousPeriodEnd: previousPeriodEnd.toISOString()
+        previousPeriodEnd: previousPeriodEnd.toISOString(),
+        isMockSession: req.mockSession?.isMock || false
       });
 
-      // Check cache first (cache key includes date range)
-      const cacheKey = `${subaccountId}:${agentId}:${currentPeriodStart.getTime()}:${currentPeriodEnd.getTime()}`;
-      try {
-        const cachedStats = await redisService.getCachedAgentStats(cacheKey, cacheKey);
-        if (cachedStats) {
-          Logger.debug('Using cached agent statistics', { 
-            operationId, 
-            agentId,
-            currentPeriodStart: currentPeriodStart.toISOString(),
-            currentPeriodEnd: currentPeriodEnd.toISOString(),
-            cacheHit: true 
-          });
-          
-          return res.json({
-            success: true,
-            message: 'Agent details retrieved successfully (cached)',
-            data: cachedStats,
-            meta: {
-              operationId,
-              duration: `${Date.now() - startTime}ms`,
-              cached: true
-            }
+      // For MOCK sessions, skip cache and use hybrid storage
+      const isMockSession = req.mockSession?.isMock && req.mockSession?.sessionId;
+
+      // Check cache first (only for non-mock sessions)
+      if (!isMockSession) {
+        const cacheKey = `${subaccountId}:${agentId}:${currentPeriodStart.getTime()}:${currentPeriodEnd.getTime()}`;
+        try {
+          const cachedStats = await redisService.getCachedAgentStats(cacheKey, cacheKey);
+          if (cachedStats) {
+            Logger.debug('Using cached agent statistics', { 
+              operationId, 
+              agentId,
+              cacheHit: true 
+            });
+            
+            return res.json({
+              success: true,
+              message: 'Agent details retrieved successfully (cached)',
+              data: cachedStats,
+              meta: {
+                operationId,
+                duration: `${Date.now() - startTime}ms`,
+                cached: true
+              }
+            });
+          }
+        } catch (cacheError) {
+          Logger.warn('Cache retrieval failed, fetching from database', {
+            operationId,
+            error: cacheError.message
           });
         }
-      } catch (cacheError) {
-        Logger.warn('Cache retrieval failed, fetching from database', {
-          operationId,
-          error: cacheError.message
-        });
       }
 
-      // Get database connection
+      // Get database connection and collections
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
       const { connection } = connectionInfo;
-
-      // Get collections
       const agentsCollection = connection.db.collection('agents');
-      const callsCollection = connection.db.collection('calls');
       const meetingsCollection = connection.db.collection('meetings');
 
       // Step 1: Find the agent
@@ -1071,6 +1178,119 @@ After appointment is booked:
           code: 'AGENT_NOT_FOUND'
         });
       }
+
+      // For MOCK sessions, use manual calculation (hybrid storage doesn't support complex aggregations)
+      if (isMockSession) {
+        Logger.info('🎭 Calculating agent stats with hybrid storage', {
+          operationId,
+          agentId,
+          mockSessionId: req.mockSession.sessionId
+        });
+
+        // Get calls from hybrid storage
+        const storage = await getStorageFromRequest(req, subaccountId, userId);
+        const callsCollection = await storage.getCollection('calls');
+        
+        // Fetch all calls for this agent
+        const allAgentCalls = await callsCollection
+          .find({ agent_id: agentId })
+          .toArray();
+
+        // Manually calculate stats for both periods
+        const currentPeriodCalls = allAgentCalls.filter(call => 
+          call.start_timestamp >= currentPeriodStart.getTime() && 
+          call.start_timestamp <= currentPeriodEnd.getTime()
+        );
+
+        const previousPeriodCalls = allAgentCalls.filter(call =>
+          call.start_timestamp >= previousPeriodStart.getTime() &&
+          call.start_timestamp < previousPeriodEnd.getTime()
+        );
+
+        // Calculate stats for current period
+        const currentStats = DatabaseController.calculatePeriodStats(currentPeriodCalls);
+        const previousStats = DatabaseController.calculatePeriodStats(previousPeriodCalls);
+
+        // Get meetings
+        const meetingsInPeriod = await meetingsCollection.countDocuments({
+          agentId: agentId,
+          createdAt: {
+            $gte: currentPeriodStart,
+            $lte: currentPeriodEnd
+          }
+        });
+
+        const meetingsInPrevious = await meetingsCollection.countDocuments({
+          agentId: agentId,
+          createdAt: {
+            $gte: previousPeriodStart,
+            $lt: previousPeriodEnd
+          }
+        });
+
+        // Calculate comparison metrics
+        const calculateChange = (current, previous) => {
+          if (previous === 0) {
+            return current > 0 ? 100 : 0;
+          }
+          return ((current - previous) / previous) * 100;
+        };
+
+        const comparison = {
+          totalCalls: {
+            percentageChange: calculateChange(currentStats.totalCalls, previousStats.totalCalls)
+          },
+          unresponsiveCalls: {
+            percentageChange: calculateChange(currentStats.unresponsiveCalls, previousStats.unresponsiveCalls)
+          },
+          cumulativeSuccessRate: {
+            percentageChange: calculateChange(currentStats.cumulativeSuccessRate, previousStats.cumulativeSuccessRate)
+          },
+          meetingsBooked: {
+            percentageChange: calculateChange(meetingsInPeriod, meetingsInPrevious)
+          }
+        };
+
+        const result = {
+          agent: {
+            agentId: agentDocument.agentId,
+            name: agentDocument.name,
+            description: agentDocument.description,
+            voiceId: agentDocument.voiceId,
+            language: agentDocument.language
+          },
+          currentPeriod: {
+            ...currentStats,
+            periodStart: currentPeriodStart.toISOString(),
+            periodEnd: currentPeriodEnd.toISOString(),
+            meetingsBooked: meetingsInPeriod
+          },
+          previousPeriod: {
+            ...previousStats,
+            periodStart: previousPeriodStart.toISOString(),
+            periodEnd: previousPeriodEnd.toISOString(),
+            meetingsBooked: meetingsInPrevious
+          },
+          comparison
+        };
+
+        const duration = Date.now() - startTime;
+
+        return res.json({
+          success: true,
+          message: 'Agent details retrieved successfully (mock mode)',
+          data: result,
+          meta: {
+            operationId,
+            duration: `${duration}ms`,
+            isMockSession: true,
+            source: 'Redis + MongoDB'
+          }
+        });
+      }
+
+      // For REGULAR sessions, use MongoDB aggregation
+      const callsCollection = connection.db.collection('calls');
 
       // Step 2: Use aggregation to calculate statistics for both periods
       const statisticsAggregation = await callsCollection.aggregate([
