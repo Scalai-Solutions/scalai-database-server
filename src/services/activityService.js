@@ -19,6 +19,7 @@ const ACTIVITY_TYPES = {
   // Call activities
   WEB_CALL_CREATED: 'web_call_created',
   PHONE_CALL_CREATED: 'phone_call_created',
+  INBOUND_CALL_RECEIVED: 'inbound_call_received',
   CALL_UPDATED: 'call_updated',
   CALL_LOGS_VIEWED: 'call_logs_viewed',
   CALL_DELETED: 'call_deleted',
@@ -27,6 +28,9 @@ const ACTIVITY_TYPES = {
   CHAT_CREATED: 'chat_created',
   CHAT_MESSAGE_SENT: 'chat_message_sent',
   CHAT_ENDED: 'chat_ended',
+  
+  // Meeting activities
+  MEETING_BOOKED: 'meeting_booked',
   
   // Connector activities
   CONNECTOR_ADDED: 'connector_added',
@@ -47,6 +51,7 @@ const ACTIVITY_CATEGORIES = {
   CHAT_AGENT: 'chat_agent',
   CALL: 'call',
   CHAT: 'chat',
+  MEETING: 'meeting',
   CONNECTOR: 'connector'
 };
 

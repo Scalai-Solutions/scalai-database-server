@@ -510,7 +510,7 @@ class CallController {
         activityType: ACTIVITY_TYPES.PHONE_CALL_CREATED,
         category: ACTIVITY_CATEGORIES.CALL,
         userId,
-        description: `Phone call created from ${from_number} to ${to_number}`,
+        description: `Outbound call was initiated to ${to_number}`,
         metadata: {
           callId: phoneCallResponse.call_id,
           from_number,
@@ -1138,7 +1138,7 @@ class CallController {
         activityType: ACTIVITY_TYPES.PHONE_CALL_CREATED,
         category: ACTIVITY_CATEGORIES.CALL,
         userId,
-        description: `Batch call created with ${batchCallResponse.total_task_count} tasks from ${from_number}`,
+        description: `Bulk call was initiated to ${batchCallResponse.total_task_count} numbers`,
         metadata: {
           batchCallId: batchCallResponse.batch_call_id,
           from_number,

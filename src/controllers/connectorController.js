@@ -1,31 +1,72 @@
 const connectionPoolManager = require('../services/connectionPoolManager');
 const connectorService = require('../services/connectorService');
 const twilioService = require('../services/twilioService');
+const encryptionService = require('../services/encryptionService');
 const Logger = require('../utils/logger');
 const ActivityService = require('../services/activityService');
 const { ACTIVITY_TYPES, ACTIVITY_CATEGORIES } = ActivityService;
 
 /**
- * Helper function to mask sensitive Twilio credentials before sending to frontend
+ * Helper function to mask sensitive credentials before sending to frontend
+ * Works generically for any connector that uses encryption
+ */
+function sanitizeConnectorConfig(config, connectorType, connector = null) {
+  if (!config) return config;
+  
+  // Use generic encryption service for sanitization
+  return encryptionService.sanitizeConfig(config, connectorType);
+}
+
+/**
+ * DEPRECATED: Legacy function for backward compatibility
+ * Use sanitizeConnectorConfig instead
  */
 function sanitizeTwilioConfig(config, connectorType) {
-  if (connectorType !== 'twilio' || !config) return config;
+  return sanitizeConnectorConfig(config, connectorType);
+}
+
+/**
+ * Helper function to filter config based on connector's schema
+ * Only keeps fields that are defined in the connector's configSchema
+ */
+function filterConfigBySchema(config, connector) {
+  if (!config || typeof config !== 'object') {
+    return config;
+  }
   
-  const sanitized = { ...config };
+  // If connector has no schema, return config as-is
+  if (!connector || !connector.configSchema || !Array.isArray(connector.configSchema)) {
+    Logger.debug('No config schema found for connector, allowing all fields');
+    return config;
+  }
   
-  // Mask credential values
-  if (sanitized.SID) sanitized.SID = '********';
-  if (sanitized.accountSid) sanitized.accountSid = '********';
-  if (sanitized.AuthToken) sanitized.AuthToken = '********';
-  if (sanitized.authToken) sanitized.authToken = '********';
+  // Get list of allowed field names from schema
+  const allowedFields = connector.configSchema.map(field => field.name);
   
-  // Remove encryption metadata from response
-  delete sanitized.sidIV;
-  delete sanitized.sidAuthTag;
-  delete sanitized.tokenIV;
-  delete sanitized.tokenAuthTag;
+  Logger.debug('Filtering config by schema', {
+    allowedFields,
+    providedFields: Object.keys(config),
+    connectorType: connector.type
+  });
   
-  return sanitized;
+  // Filter config to only include allowed fields
+  const filteredConfig = {};
+  allowedFields.forEach(fieldName => {
+    if (config.hasOwnProperty(fieldName)) {
+      filteredConfig[fieldName] = config[fieldName];
+    }
+  });
+  
+  // Log removed fields for debugging
+  const removedFields = Object.keys(config).filter(key => !allowedFields.includes(key));
+  if (removedFields.length > 0) {
+    Logger.info('Removed invalid config fields', {
+      removedFields,
+      connectorType: connector.type
+    });
+  }
+  
+  return filteredConfig;
 }
 
 class ConnectorController {
@@ -46,16 +87,16 @@ class ConnectorController {
         : null;
 
       // Try to get from cache first
-      const cached = await connectorService.getCachedConnectorList();
-      if (cached) {
-        Logger.debug('Returning cached connector list');
-        return res.status(200).json({
-          success: true,
-          message: 'Connectors retrieved successfully',
-          data: cached,
-          cached: true
-        });
-      }
+      // const cached = await connectorService.getCachedConnectorList();
+      // if (cached) {
+      //   Logger.debug('Returning cached connector list');
+      //   return res.status(200).json({
+      //     success: true,
+      //     message: 'Connectors retrieved successfully',
+      //     data: cached,
+      //     cached: true
+      //   });
+      // }
 
       // Fetch from tenant manager with access token
       const result = await connectorService.getAvailableConnectors(accessToken);
@@ -141,55 +182,41 @@ class ConnectorController {
         });
       }
 
-      // Encrypt Twilio credentials if this is a Twilio connector
-      let finalConfig = connectorConfig || {};
+      // Filter config to only include fields defined in connector schema
+      let validatedConfig = connectorConfig ? filterConfigBySchema(connectorConfig, connectorResult.data.connector) : {};
       
-      Logger.debug('Checking if Twilio encryption needed for new connector', { 
+      // Encrypt connector credentials if connector requires encryption
+      let finalConfig = validatedConfig;
+      
+      Logger.debug('Checking if encryption needed for new connector', { 
         connectorType: connectorResult.data.type, 
-        hasConfig: !!connectorConfig,
-        hasSID: !!(connectorConfig && connectorConfig.SID),
-        hasAuthToken: !!(connectorConfig && connectorConfig.AuthToken)
+        hasConfig: !!validatedConfig,
+        requiresEncryption: encryptionService.requiresEncryption(connectorResult.data.connector)
       });
       
-      if (connectorResult.data.type === 'twilio' && connectorConfig) {
-        // Check if credentials are provided (supporting both naming conventions)
-        const sid = connectorConfig.SID || connectorConfig.accountSid;
-        const authToken = connectorConfig.AuthToken || connectorConfig.authToken;
+      // Generic encryption for all connectors that require it
+      if (validatedConfig && Object.keys(validatedConfig).length > 0 && encryptionService.requiresEncryption(connectorResult.data.connector)) {
+        Logger.info('Encrypting connector credentials before storage', { 
+          subaccountId, 
+          connectorId,
+          connectorType: connectorResult.data.type
+        });
         
-        if (sid || authToken) {
-          Logger.info('Encrypting Twilio credentials before storage', { 
-            subaccountId, 
-            connectorId,
-            hasSID: !!sid,
-            hasAuthToken: !!authToken
-          });
-          
-          finalConfig = { ...connectorConfig };
-          
-          // Encrypt SID if provided
-          if (sid) {
-            const encryptedSid = twilioService.encryptCredential(sid);
-            finalConfig.SID = encryptedSid.encrypted;
-            finalConfig.sidIV = encryptedSid.iv;
-            finalConfig.sidAuthTag = encryptedSid.authTag;
-            // Remove old field names if they exist
-            delete finalConfig.accountSid;
-            Logger.debug('SID encrypted', { subaccountId });
-          }
-          
-          // Encrypt AuthToken if provided
-          if (authToken) {
-            const encryptedToken = twilioService.encryptCredential(authToken);
-            finalConfig.AuthToken = encryptedToken.encrypted;
-            finalConfig.tokenIV = encryptedToken.iv;
-            finalConfig.tokenAuthTag = encryptedToken.authTag;
-            // Remove old field names if they exist
-            delete finalConfig.authToken;
-            Logger.debug('AuthToken encrypted', { subaccountId });
-          }
-          
-          Logger.info('Twilio credentials encrypted successfully', { subaccountId });
-        }
+        // Get list of fields that should be encrypted for this connector
+        const fieldsToEncrypt = encryptionService.getEncryptableFields(connectorResult.data.connector);
+        
+        // Encrypt the config using generic encryption service
+        finalConfig = encryptionService.encryptConfig(
+          validatedConfig, 
+          connectorResult.data.type,
+          fieldsToEncrypt
+        );
+        
+        Logger.info('Connector credentials encrypted successfully', { 
+          subaccountId,
+          connectorType: connectorResult.data.type,
+          fieldsEncrypted: fieldsToEncrypt || 'all'
+        });
       }
 
       // Create connector-subaccount relationship
@@ -206,9 +233,6 @@ class ConnectorController {
       };
 
       const result = await connection.db.collection('connectorsubaccount').insertOne(connectorSubaccount);
-
-      // Invalidate cache
-      await connectorService.invalidateSubaccountConnectorsCache(subaccountId);
       
       // Invalidate Twilio cache if this is a Twilio connector
       if (connectorResult.data.type === 'twilio') {
@@ -218,14 +242,18 @@ class ConnectorController {
       // Return the created connector relationship with connector details
       const createdConnector = {
         ...connectorSubaccount,
-        config: sanitizeTwilioConfig(connectorSubaccount.config, connectorResult.data.type),
+        config: sanitizeConnectorConfig(connectorSubaccount.config, connectorResult.data.type, connectorResult.data.connector),
         _id: result.insertedId,
         connector: connectorResult.data.connector
       };
 
+      // Get connector name for activity logging
+      const connectorName = connectorResult.data?.connector?.name || connectorId;
+
       Logger.info('Connector added to subaccount successfully', {
         subaccountId,
         connectorId,
+        connectorName,
         id: result.insertedId
       });
 
@@ -235,15 +263,15 @@ class ConnectorController {
         activityType: ACTIVITY_TYPES.CONNECTOR_ADDED,
         category: ACTIVITY_CATEGORIES.CONNECTOR,
         userId: req.user?.id || 'system',
-        description: `Connector ${connectorResult.data.connector?.name || connectorId} added to subaccount`,
+        description: `Connector ${connectorName} added to subaccount`,
         metadata: {
           connectorId,
-          connectorName: connectorResult.data.connector?.name,
+          connectorName: connectorName !== connectorId ? connectorName : undefined,
           connectorType: connectorResult.data.category,
           isActive: connectorSubaccount.isActive
         },
         resourceId: connectorId,
-        resourceName: connectorResult.data.connector?.name || connectorId,
+        resourceName: connectorName,
         operationId: req.requestId
       });
 
@@ -282,18 +310,6 @@ class ConnectorController {
         requestId: req.requestId
       });
 
-      // Try to get from cache first
-      const cached = await connectorService.getCachedSubaccountConnectors(subaccountId);
-      if (cached) {
-        Logger.debug('Returning cached subaccount connectors');
-        return res.status(200).json({
-          success: true,
-          message: 'Connectors retrieved successfully',
-          data: cached,
-          cached: true
-        });
-      }
-
       // Get database connection
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
       // if (!dbConnection || !dbConnection.client) {
@@ -326,7 +342,7 @@ class ConnectorController {
           const connectorResult = await connectorService.getConnectorById(conn.connectorId, accessToken);
           return {
             ...conn,
-            config: sanitizeTwilioConfig(conn.config, conn.connectorType),
+            config: sanitizeConnectorConfig(conn.config, conn.connectorType, connectorResult.success ? connectorResult.data.connector : null),
             connector: connectorResult.success ? connectorResult.data.connector : null
           };
         })
@@ -337,14 +353,10 @@ class ConnectorController {
         total: connectorsWithDetails.length
       };
 
-      // Cache the result
-      await connectorService.cacheSubaccountConnectors(subaccountId, responseData);
-
       return res.status(200).json({
         success: true,
         message: 'Connectors retrieved successfully',
-        data: responseData,
-        cached: false
+        data: responseData
       });
 
     } catch (error) {
@@ -395,64 +407,83 @@ class ConnectorController {
         });
       }
 
-      // Encrypt Twilio credentials if this is a Twilio connector and credentials are being updated
-      let finalConfig = connectorConfig;
+      // Extract access token from Authorization header for connector details
+      const authHeader = req.headers['authorization'];
+      const accessToken = authHeader && authHeader.startsWith('Bearer ') 
+        ? authHeader.substring(7) 
+        : null;
+
+      // Get connector details to check if encryption is required
+      const connectorResult = await connectorService.getConnectorById(connectorId, accessToken);
       
-      Logger.debug('Checking if Twilio encryption needed', { 
+      // Filter config to only include fields defined in connector schema
+      const validatedConfig = connectorConfig ? filterConfigBySchema(connectorConfig, connectorResult.data.connector) : {};
+      
+      // Encrypt connector credentials if connector requires encryption
+      let finalConfig = validatedConfig;
+      
+      Logger.debug('Checking if encryption needed for connector update', { 
         connectorType: existingConnector.connectorType, 
-        hasConfig: !!connectorConfig,
-        configKeys: connectorConfig ? Object.keys(connectorConfig) : [],
-        hasSID: !!(connectorConfig && connectorConfig.SID),
-        hasAuthToken: !!(connectorConfig && connectorConfig.AuthToken)
+        hasConfig: !!validatedConfig,
+        configKeys: validatedConfig ? Object.keys(validatedConfig) : [],
+        requiresEncryption: connectorResult.success && encryptionService.requiresEncryption(connectorResult.data.connector)
       });
       
-      if (existingConnector.connectorType === 'twilio' && connectorConfig) {
-        // Check if credentials are provided and need encryption (supporting both naming conventions)
-        const sid = connectorConfig.SID || connectorConfig.accountSid;
-        const authToken = connectorConfig.AuthToken || connectorConfig.authToken;
+      // Generic encryption for all connectors that require it
+      if (validatedConfig && Object.keys(validatedConfig).length > 0 && connectorResult.success && encryptionService.requiresEncryption(connectorResult.data.connector)) {
+        Logger.info('Encrypting connector credentials before update', { 
+          subaccountId, 
+          connectorId,
+          connectorType: existingConnector.connectorType
+        });
         
-        if (sid || authToken) {
-          Logger.info('Encrypting Twilio credentials before update', { 
-            subaccountId, 
-            connectorId,
-            hasSID: !!sid,
-            hasAuthToken: !!authToken
-          });
-          
-          // Start with existing config to preserve fields not being updated
-          finalConfig = { ...existingConnector.config };
-          
-          // Merge in the new config (non-credential fields)
-          Object.keys(connectorConfig).forEach(key => {
-            if (!['SID', 'accountSid', 'AuthToken', 'authToken', 'sidIV', 'sidAuthTag', 'tokenIV', 'tokenAuthTag'].includes(key)) {
-              finalConfig[key] = connectorConfig[key];
-            }
-          });
-          
-          // Encrypt SID if provided (partial update support)
-          if (sid) {
-            const encryptedSid = twilioService.encryptCredential(sid);
-            finalConfig.SID = encryptedSid.encrypted;
-            finalConfig.sidIV = encryptedSid.iv;
-            finalConfig.sidAuthTag = encryptedSid.authTag;
-            // Remove old field names if they exist
-            delete finalConfig.accountSid;
-            Logger.debug('SID encrypted', { subaccountId });
+        // Start with existing config to preserve fields not being updated
+        const baseConfig = { ...existingConnector.config };
+        
+        // Merge in the new validated config (non-encrypted fields from user input)
+        Object.keys(validatedConfig).forEach(key => {
+          // Skip encryption metadata fields
+          if (!key.endsWith('IV') && !key.endsWith('AuthTag') && !key.endsWith('_encrypted')) {
+            baseConfig[key] = validatedConfig[key];
           }
+        });
+        
+        // Get list of fields that should be encrypted for this connector
+        const fieldsToEncrypt = encryptionService.getEncryptableFields(connectorResult.data.connector);
+        
+        // Encrypt only the fields that are being updated
+        const fieldsToEncryptNow = fieldsToEncrypt 
+          ? fieldsToEncrypt.filter(field => validatedConfig.hasOwnProperty(field))
+          : Object.keys(validatedConfig).filter(key => 
+              typeof validatedConfig[key] === 'string' && 
+              !key.endsWith('IV') && 
+              !key.endsWith('AuthTag')
+            );
+        
+        if (fieldsToEncryptNow.length > 0) {
+          // Encrypt the updated fields
+          const encryptedFields = encryptionService.encryptConfig(
+            validatedConfig, 
+            existingConnector.connectorType,
+            fieldsToEncryptNow
+          );
           
-          // Encrypt AuthToken if provided (partial update support)
-          if (authToken) {
-            const encryptedToken = twilioService.encryptCredential(authToken);
-            finalConfig.AuthToken = encryptedToken.encrypted;
-            finalConfig.tokenIV = encryptedToken.iv;
-            finalConfig.tokenAuthTag = encryptedToken.authTag;
-            // Remove old field names if they exist
-            delete finalConfig.authToken;
-            Logger.debug('AuthToken encrypted', { subaccountId });
-          }
-          
-          Logger.info('Twilio credentials encrypted successfully', { subaccountId });
+          // Merge encrypted fields into the base config
+          Object.keys(encryptedFields).forEach(key => {
+            baseConfig[key] = encryptedFields[key];
+          });
         }
+        
+        finalConfig = baseConfig;
+        
+        Logger.info('Connector credentials encrypted successfully', { 
+          subaccountId,
+          connectorType: existingConnector.connectorType,
+          fieldsEncrypted: fieldsToEncryptNow.length
+        });
+      } else if (validatedConfig && Object.keys(validatedConfig).length > 0) {
+        // If no encryption needed, just merge the validated config with existing config
+        finalConfig = { ...existingConnector.config, ...validatedConfig };
       }
 
       // Update the connector config
@@ -470,8 +501,7 @@ class ConnectorController {
         { $set: updateData }
       );
 
-      // Invalidate caches
-      await connectorService.invalidateSubaccountConnectorsCache(subaccountId);
+      // Invalidate connector config cache
       await connectorService.invalidateSubaccountConnectorConfigCache(subaccountId, connectorId);
       
       // Invalidate Twilio cache if this is a Twilio connector
@@ -479,28 +509,30 @@ class ConnectorController {
         await twilioService.invalidateCache(subaccountId);
       }
 
-      // Extract access token from Authorization header
-      const authHeader = req.headers['authorization'];
-      const accessToken = authHeader && authHeader.startsWith('Bearer ') 
-        ? authHeader.substring(7) 
-        : null;
-
       // Get updated connector with details
       const updatedConnector = await connection.db.collection('connectorsubaccount').findOne({
         subaccountId,
         connectorId
       });
 
-      const connectorResult = await connectorService.getConnectorById(connectorId, accessToken);
       const connectorWithDetails = {
         ...updatedConnector,
-        config: sanitizeTwilioConfig(updatedConnector.config, updatedConnector.connectorType),
+        config: sanitizeConnectorConfig(updatedConnector.config, updatedConnector.connectorType, connectorResult.success ? connectorResult.data.connector : null),
         connector: connectorResult.success ? connectorResult.data.connector : null
       };
 
+      // Get connector name for activity logging
+      const connectorName = (connectorResult.success && connectorResult.data?.connector?.name) 
+        ? connectorResult.data.connector.name 
+        : connectorId;
+
       Logger.info('Connector config updated successfully', {
         subaccountId,
-        connectorId
+        connectorId,
+        connectorName,
+        connectorFetchSuccess: connectorResult.success,
+        hasConnectorData: !!connectorResult.data?.connector,
+        actualConnectorName: connectorResult.data?.connector?.name
       });
 
       // Log activity
@@ -509,15 +541,15 @@ class ConnectorController {
         activityType: ACTIVITY_TYPES.CONNECTOR_UPDATED,
         category: ACTIVITY_CATEGORIES.CONNECTOR,
         userId: req.user?.id || 'system',
-        description: `Connector ${connectorResult.data.connector?.name || connectorId} configuration updated`,
+        description: `Connector ${connectorName} configuration updated`,
         metadata: {
           connectorId,
-          connectorName: connectorResult.data.connector?.name,
+          connectorName: connectorName !== connectorId ? connectorName : undefined,
           isActive: updatedConnector.isActive,
           updatedFields: Object.keys(updateData)
         },
         resourceId: connectorId,
-        resourceName: connectorResult.data.connector?.name || connectorId,
+        resourceName: connectorName,
         operationId: req.requestId
       });
 
@@ -577,19 +609,25 @@ class ConnectorController {
         });
       }
 
+      // Get connector details from connectors collection for the name
+      const connectorResult = await connectorService.getConnectorById(connectorId);
+      const connectorName = connectorResult.success && connectorResult.data.connector?.name 
+        ? connectorResult.data.connector.name 
+        : connectorId;
+
       // Delete the connector
       await connection.db.collection('connectorsubaccount').deleteOne({
         subaccountId,
         connectorId
       });
 
-      // Invalidate caches
-      await connectorService.invalidateSubaccountConnectorsCache(subaccountId);
+      // Invalidate connector config cache
       await connectorService.invalidateSubaccountConnectorConfigCache(subaccountId, connectorId);
 
       Logger.info('Connector deleted from subaccount successfully', {
         subaccountId,
-        connectorId
+        connectorId,
+        connectorName
       });
 
       // Log activity
@@ -598,13 +636,14 @@ class ConnectorController {
         activityType: ACTIVITY_TYPES.CONNECTOR_DELETED,
         category: ACTIVITY_CATEGORIES.CONNECTOR,
         userId: req.user?.id || 'system',
-        description: `Connector ${connectorId} removed from subaccount`,
+        description: `Connector ${connectorName} removed from subaccount`,
         metadata: {
           connectorId,
+          connectorName,
           deletedConnectorType: existingConnector.connectorType
         },
         resourceId: connectorId,
-        resourceName: connectorId,
+        resourceName: connectorName,
         operationId: req.requestId
       });
 
@@ -855,13 +894,19 @@ class ConnectorController {
         { $set: updateData }
       );
 
-      // Invalidate caches
-      await connectorService.invalidateSubaccountConnectorsCache(subaccountId);
+      // Invalidate connector config cache
       await connectorService.invalidateSubaccountConnectorConfigCache(subaccountId, connectorId);
+
+      // Get connector details from connectors collection for the name
+      const connectorResult = await connectorService.getConnectorById(connectorId);
+      const connectorName = connectorResult.success && connectorResult.data.connector?.name 
+        ? connectorResult.data.connector.name 
+        : connectorId;
 
       Logger.info('Connector metadata updated successfully', {
         subaccountId,
-        connectorId
+        connectorId,
+        connectorName
       });
 
       // Log activity
@@ -870,14 +915,15 @@ class ConnectorController {
         activityType: ACTIVITY_TYPES.CONNECTOR_METADATA_UPDATED,
         category: ACTIVITY_CATEGORIES.CONNECTOR,
         userId: req.service?.serviceName || 'system',
-        description: `Connector ${connectorId} metadata updated`,
+        description: `Connector ${connectorName} metadata updated`,
         metadata: {
           connectorId,
+          connectorName,
           metadataKeys: Object.keys(metadata),
           serviceName: req.service?.serviceName
         },
         resourceId: connectorId,
-        resourceName: connectorId,
+        resourceName: connectorName,
         operationId: req.requestId
       });
 

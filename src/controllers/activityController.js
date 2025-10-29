@@ -214,6 +214,89 @@ class ActivityController {
   }
   
   /**
+   * Log activity (service-to-service endpoint)
+   * POST /api/activities/:subaccountId/log
+   */
+  static async logActivity(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+    
+    try {
+      const { subaccountId } = req.params;
+      const {
+        activityType,
+        category,
+        userId,
+        description,
+        metadata = {},
+        resourceId = null,
+        resourceName = null
+      } = req.body;
+      
+      // Validate required fields
+      if (!activityType || !category || !description) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required fields: activityType, category, description',
+          code: 'MISSING_REQUIRED_FIELDS'
+        });
+      }
+      
+      Logger.info('Logging activity via service endpoint', {
+        operationId,
+        subaccountId,
+        activityType,
+        category,
+        serviceName: req.service?.serviceName || 'unknown'
+      });
+      
+      // Log the activity
+      const result = await ActivityService.logActivity({
+        subaccountId,
+        activityType,
+        category,
+        userId: userId || req.service?.serviceName || 'system',
+        description,
+        metadata,
+        resourceId,
+        resourceName,
+        operationId
+      });
+      
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to log activity',
+          code: 'ACTIVITY_LOG_FAILED',
+          error: result.error
+        });
+      }
+      
+      const duration = Date.now() - startTime;
+      
+      Logger.info('Activity logged successfully via service', {
+        operationId,
+        subaccountId,
+        activityType,
+        duration: `${duration}ms`
+      });
+      
+      res.json({
+        success: true,
+        message: 'Activity logged successfully',
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+      
+    } catch (error) {
+      const errorInfo = await ActivityController.handleError(error, req, operationId, 'logActivity', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+  
+  /**
    * Error handling
    */
   static async handleError(error, req, operationId, operation, startTime) {

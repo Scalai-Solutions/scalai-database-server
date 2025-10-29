@@ -5,55 +5,41 @@ const config = require('../../config/config');
 const Logger = require('../utils/logger');
 const redisService = require('./redisService');
 const connectionPoolManager = require('./connectionPoolManager');
+const encryptionService = require('./encryptionService');
 
 class TwilioService {
   constructor() {
     this.clients = new Map(); // Cache for Twilio client instances
   }
 
-  // Encrypt credentials before storing in database
+  /**
+   * Encrypt credentials before storing in database
+   * Uses generic encryption service for consistency
+   * @param {string} credential - The credential to encrypt
+   * @returns {Object} { encrypted, iv, authTag }
+   */
   encryptCredential(credential) {
     try {
-      const algorithm = 'aes-256-gcm';
-      const secretKey = crypto.scryptSync(config.encryption.key, 'twilio-salt', 32);
-      
-      // Generate a random IV for each encryption
-      const iv = crypto.randomBytes(16);
-      
-      const cipher = crypto.createCipheriv(algorithm, secretKey, iv);
-      
-      let encrypted = cipher.update(credential, 'utf8', 'hex');
-      encrypted += cipher.final('hex');
-      
-      // Get the auth tag for GCM mode
-      const authTag = cipher.getAuthTag();
-      
-      return {
-        encrypted,
-        iv: iv.toString('hex'),
-        authTag: authTag.toString('hex')
-      };
+      return encryptionService.encryptField(credential, 'twilio');
     } catch (error) {
+      Logger.error('Failed to encrypt Twilio credential', { error: error.message });
       throw new Error('Failed to encrypt credential: ' + error.message);
     }
   }
 
-  // Decrypt credentials using the same method as MongoDB URL
+  /**
+   * Decrypt credentials
+   * Uses generic encryption service for consistency
+   * @param {string} encrypted - The encrypted value
+   * @param {string} iv - The initialization vector
+   * @param {string} authTag - The authentication tag
+   * @returns {string} Decrypted credential
+   */
   decryptCredential(encrypted, iv, authTag) {
     try {
-      const algorithm = 'aes-256-gcm';
-      const secretKey = crypto.scryptSync(config.encryption.key, 'twilio-salt', 32);
-      
-      const decipher = crypto.createDecipheriv(algorithm, secretKey, Buffer.from(iv, 'hex'));
-      
-      // Set auth tag for GCM mode
-      decipher.setAuthTag(Buffer.from(authTag, 'hex'));
-      
-      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-      decrypted += decipher.final('utf8');
-      
-      return decrypted;
+      return encryptionService.decryptField(encrypted, iv, authTag, 'twilio');
     } catch (error) {
+      Logger.error('Failed to decrypt Twilio credential', { error: error.message });
       throw new Error('Failed to decrypt credential: ' + error.message);
     }
   }

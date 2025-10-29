@@ -6,6 +6,7 @@ const ActivityController = require('../controllers/activityController');
 
 // Import middleware
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
+const { authenticateServiceToken } = require('../middleware/serviceAuthMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
 
@@ -16,7 +17,15 @@ const {
   validateGetActivityStatsQuery
 } = require('../validators/activityValidator');
 
-// Apply common middleware
+// POST /api/activities/:subaccountId/log - Log activity (service-to-service only)
+router.post('/:subaccountId/log',
+  requestLogger,
+  authenticateServiceToken,
+  validateSubaccountId,
+  ActivityController.logActivity
+);
+
+// Apply common middleware for user endpoints
 router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
