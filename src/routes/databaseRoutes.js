@@ -197,6 +197,33 @@ router.get('/:subaccountId/chat-agents/:agentId',
   DatabaseController.getChatAgentDetails
 );
 
+// GET /api/database/:subaccountId/chat-agents/:agentId/chat-analytics - Get detailed chat analytics
+router.get('/:subaccountId/chat-agents/:agentId/chat-analytics',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.getChatAgentAnalytics
+);
+
+// GET /api/database/:subaccountId/chat-agents/:agentId/analytics-stats - Get analytics stats with period comparison
+router.get('/:subaccountId/chat-agents/:agentId/analytics-stats',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.getChatAnalyticsStats
+);
+
+// GET /api/database/:subaccountId/chat-agents/:agentId/costs-breakdown - Get cost breakdown
+router.get('/:subaccountId/chat-agents/:agentId/costs-breakdown',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.getChatCostsBreakdown
+);
+
 // DELETE /api/database/:subaccountId/chat-agents/:agentId - Delete chat agent
 router.delete('/:subaccountId/chat-agents/:agentId',
   validateSubaccountId,

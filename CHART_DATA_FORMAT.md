@@ -21,13 +21,27 @@ Each chart includes a `width` property that specifies the recommended width as a
 - Example: `width: 50` means 50% of container = 25% of screen width
 - Example: `width: 100` means 100% of container = 50% of screen width
 
-**Recommended widths by chart type:**
-- **Pie Chart**: `50%` - Compact display works well for circular charts
-- **Bar Chart**: `100%` - Full width for easier comparison
-- **Horizontal Bar Chart**: `100%` - Full width for long labels
-- **Line Chart**: `100%` - Full width for timeline visualization
-- **Multi-line Chart**: `100%` - Full width for comparing multiple series
-- **Heatmap**: `100%` - Full width for 24-hour grid display
+**Dynamic Width Calculation:**
+
+The AI Insights service intelligently calculates chart widths based on:
+- **Chart Type**: Different visualizations have different space requirements
+- **Data Complexity**: Number of data points, categories, or series
+- **Label Length**: Charts with long labels receive more space
+- **Series Count**: Multi-line charts with many series get wider
+
+**Possible width values:**
+- **33%**: Simple charts with minimal data (e.g., pie chart with ≤4 slices) - allows 3 per row
+- **50%**: Moderate complexity (e.g., bar chart with 3-5 categories) - allows 2 per row
+- **66%**: More complex data (e.g., bar chart with 6-7 categories) - allows ~1.5 per row
+- **100%**: Complex visualizations (e.g., heatmaps, many data points) - full width
+
+**Width guidelines by chart type:**
+- **Pie Chart**: 33-66% depending on number of slices (compact circular display)
+- **Bar Chart**: 33-100% based on categories and label length
+- **Horizontal Bar Chart**: 50-100% depending on label length (labels on left need space)
+- **Line Chart**: 50-100% based on data points and number of series
+- **Multi-line Chart**: 50-100% depending on series count and data complexity
+- **Heatmap**: Always 100% (24-hour grid requires full width)
 
 **Frontend Implementation:**
 
@@ -348,23 +362,23 @@ const transformedData = heatmapData.data.reduce((acc, item) => {
         "type": "pie",
         "title": "Activity Distribution by Category",
         "description": "Breakdown of activities across different categories",
-        "width": 50,
+        "width": 33,
         "data": {
-          "labels": ["agent", "call", "chat", "connector"],
-          "values": [45, 67, 32, 8],
-          "colors": ["#3B82F6", "#10B981", "#F59E0B", "#EF4444"]
+          "labels": ["agent", "call", "chat"],
+          "values": [45, 67, 32],
+          "colors": ["#3B82F6", "#10B981", "#F59E0B"]
         }
       },
       {
         "type": "bar",
         "title": "Activity Count by Category",
         "description": "Comparison of activity volumes across categories",
-        "width": 100,
+        "width": 50,
         "data": {
-          "labels": ["agent", "call", "chat", "connector"],
+          "labels": ["agent", "call", "chat"],
           "datasets": [{
             "label": "Activity Count",
-            "values": [45, 67, 32, 8],
+            "values": [45, 67, 32],
             "backgroundColor": "#3B82F6"
           }]
         }
@@ -375,13 +389,27 @@ const transformedData = heatmapData.data.reduce((acc, item) => {
         "description": "Daily activity trend over the past week",
         "width": 100,
         "data": {
-          "labels": ["2024-01-08", "2024-01-09", "2024-01-10"],
+          "labels": ["2024-01-08", "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12", "2024-01-13", "2024-01-14"],
           "datasets": [{
             "label": "Total Activities",
-            "values": [12, 18, 25],
+            "values": [12, 18, 25, 30, 22, 28, 21],
             "borderColor": "#3B82F6",
             "backgroundColor": "rgba(59, 130, 246, 0.1)",
             "fill": true
+          }]
+        }
+      },
+      {
+        "type": "horizontalBar",
+        "title": "Top Activity Types",
+        "description": "Most common operations performed",
+        "width": 66,
+        "data": {
+          "labels": ["agent created", "call processed", "chat message", "connector sync", "agent updated"],
+          "datasets": [{
+            "label": "Count",
+            "values": [45, 67, 32, 15, 20],
+            "backgroundColor": "#10B981"
           }]
         }
       }
@@ -399,6 +427,12 @@ const transformedData = heatmapData.data.reduce((acc, item) => {
   }
 }
 ```
+
+**Note:** The `width` values (33, 50, 66, 100) are dynamically calculated based on data complexity. In this example:
+- Pie chart (33%): Simple with 3 categories - allows 3 charts per row
+- Bar chart (50%): Moderate with 3 categories - allows 2 charts per row  
+- Line chart (100%): 7 data points showing weekly trend - needs full width
+- Horizontal bar (66%): 5 items with medium labels - allows ~1.5 charts per row
 
 ## React Example
 

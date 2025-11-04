@@ -250,26 +250,59 @@ Each insight response includes a `charts` array with multiple ready-to-use chart
 - The `width` value is a percentage **relative to that container**
 - Example: `width: 50` = 50% of container = 25% of screen width
 - Example: `width: 100` = 100% of container = 50% of screen width
+- Width is **dynamically calculated** based on data complexity, chart type, and label length
+
+**Dynamic Width Calculation:**
+Charts automatically receive optimal widths (33%, 50%, 66%, or 100%) based on:
+- Chart type characteristics (pie charts are compact, heatmaps need space)
+- Number of data points or categories
+- Label length (short vs long labels)
+- Number of series (for multi-line charts)
 
 **Chart Types:**
-1. **Pie Chart** (`width: 50`) - Activity distribution by category
-2. **Bar Chart** (`width: 100`) - Activity count by category
-3. **Horizontal Bar** (`width: 100`) - Top 10 activity types
-4. **Line Chart** (`width: 100`) - Activity timeline (7 days)
-5. **Multi-line Chart** (`width: 100`) - Activity trends by category
-6. **Heatmap** (`width: 100`) - Activity by day and hour
+1. **Pie Chart** (`width: 33-66%`) - Activity distribution by category
+2. **Bar Chart** (`width: 33-100%`) - Activity count by category
+3. **Horizontal Bar** (`width: 50-100%`) - Top 10 activity types
+4. **Line Chart** (`width: 50-100%`) - Activity timeline (7 days)
+5. **Multi-line Chart** (`width: 50-100%`) - Activity trends by category
+6. **Heatmap** (`width: 100%`) - Activity by day and hour
 
-**Example Chart Object:**
+**Example Chart Objects:**
 ```json
+// Simple pie chart - 33% width (3 categories, allows 3 per row)
 {
   "type": "pie",
   "title": "Activity Distribution by Category",
   "description": "Breakdown of activities across different categories",
+  "width": 33,
+  "data": {
+    "labels": ["agent", "call", "chat"],
+    "values": [45, 67, 32],
+    "colors": ["#3B82F6", "#10B981", "#F59E0B"]
+  }
+}
+
+// Bar chart - 50% width (4 categories with short labels, allows 2 per row)
+{
+  "type": "bar",
+  "title": "Activity Count by Category",
+  "description": "Comparison of activity volumes across categories",
   "width": 50,
   "data": {
     "labels": ["agent", "call", "chat", "connector"],
-    "values": [45, 67, 32, 8],
-    "colors": ["#3B82F6", "#10B981", "#F59E0B", "#EF4444"]
+    "values": [45, 67, 32, 8]
+  }
+}
+
+// Complex line chart - 100% width (many data points)
+{
+  "type": "line",
+  "title": "Activity Timeline (Last 7 Days)",
+  "description": "Daily activity trend over the past week",
+  "width": 100,
+  "data": {
+    "labels": ["2024-01-08", "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12", "2024-01-13", "2024-01-14"],
+    "values": [12, 18, 25, 30, 22, 28, 21]
   }
 }
 ```

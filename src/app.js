@@ -21,6 +21,8 @@ const activityRoutes = require('./routes/activityRoutes');
 const aiInsightsRoutes = require('./routes/aiInsightsRoutes');
 const knowledgeBaseRoutes = require('./routes/knowledgeBaseRoutes');
 const mockSessionRoutes = require('./routes/mockSessionRoutes');
+const whatsappRoutes = require('./routes/whatsappRoutes');
+const instagramRoutes = require('./routes/instagramRoutes');
 
 const app = express();
 
@@ -69,6 +71,8 @@ app.use('/api/activities', activityRoutes);
 app.use('/api/ai-insights', aiInsightsRoutes);
 app.use('/api/knowledge-base', knowledgeBaseRoutes);
 app.use('/api/mock-sessions', mockSessionRoutes);
+app.use('/api/database', whatsappRoutes);
+app.use('/api/database', instagramRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -88,7 +92,9 @@ app.get('/', (req, res) => {
       activities: '/api/activities',
       aiInsights: '/api/ai-insights',
       knowledgeBase: '/api/knowledge-base',
-      mockSessions: '/api/mock-sessions'
+      mockSessions: '/api/mock-sessions',
+      whatsapp: '/api/database/:subaccountId/chat-agents/:agentId/whatsapp',
+      instagram: '/api/database/:subaccountId/chat-agents/:agentId/instagram'
     }
   });
 });

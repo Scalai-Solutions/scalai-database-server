@@ -222,6 +222,63 @@ class AIInsightsService {
   }
 
   /**
+   * Calculate optimal chart width based on data complexity and chart type
+   * @param {string} chartType - Type of chart (pie, bar, line, etc.)
+   * @param {number} dataPoints - Number of data points or categories
+   * @param {Array} labels - Chart labels (to check label length)
+   * @param {number} seriesCount - Number of data series (for multi-line charts)
+   * @returns {number} Width percentage (33, 50, 66, or 100)
+   */
+  calculateChartWidth(chartType, dataPoints, labels = [], seriesCount = 1) {
+    // Calculate average label length
+    const avgLabelLength = labels.length > 0 
+      ? labels.reduce((sum, label) => sum + String(label).length, 0) / labels.length 
+      : 0;
+    
+    const hasLongLabels = avgLabelLength > 15;
+
+    switch (chartType) {
+      case 'pie':
+        // Pie charts are compact and circular
+        return 100;                        // Complex, give more space
+      
+      case 'bar':
+        // Vertical bar charts
+        if (dataPoints <= 3 && !hasLongLabels) return 33;
+        if (dataPoints <= 5 && !hasLongLabels) return 50;
+        if (dataPoints <= 7) return 66;
+        return 100;  // Many categories need full width
+      
+      case 'horizontalBar':
+        // Horizontal bars need more width due to labels on left
+        if (dataPoints <= 4 && !hasLongLabels) return 50;
+        if (dataPoints <= 6 && !hasLongLabels) return 66;
+        return 100;  // Usually need full width for readable labels
+      
+      case 'line':
+        // Line charts for time series
+        if (seriesCount === 1) {
+          // Single line
+          if (dataPoints <= 4) return 50;
+          if (dataPoints <= 6) return 66;
+          return 100;
+        } else {
+          // Multiple lines need more space
+          if (seriesCount <= 2 && dataPoints <= 5) return 50;
+          if (seriesCount <= 3 && dataPoints <= 6) return 66;
+          return 100;
+        }
+      
+      case 'heatmap':
+        // Heatmaps always need full width for grid visibility
+        return 100;
+      
+      default:
+        return 100;  // Default to full width for unknown types
+    }
+  }
+
+  /**
    * Generate chart data from activities and statistics
    * @param {Array} activities - Activity documents
    * @param {Object} stats - Activity statistics
@@ -232,13 +289,16 @@ class AIInsightsService {
 
     // 1. Activity by Category - Pie Chart
     if (stats.byCategory && stats.byCategory.length > 0) {
+      const labels = stats.byCategory.map(cat => cat._id || 'Unknown');
+      const categoryCount = stats.byCategory.length;
+      
       charts.push({
         type: 'pie',
         title: 'Activity Distribution by Category',
         description: 'Breakdown of activities across different categories',
-        width: 50, // 50% of container width (compact for pie chart)
+        width: this.calculateChartWidth('pie', categoryCount, labels),
         data: {
-          labels: stats.byCategory.map(cat => cat._id || 'Unknown'),
+          labels: labels,
           values: stats.byCategory.map(cat => cat.count),
           colors: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
         }
@@ -249,9 +309,9 @@ class AIInsightsService {
         type: 'bar',
         title: 'Activity Count by Category',
         description: 'Comparison of activity volumes across categories',
-        width: 100, // 100% of container width (full width for comparison)
+        width: this.calculateChartWidth('bar', categoryCount, labels),
         data: {
-          labels: stats.byCategory.map(cat => cat._id || 'Unknown'),
+          labels: labels,
           datasets: [{
             label: 'Activity Count',
             values: stats.byCategory.map(cat => cat.count),
@@ -265,13 +325,15 @@ class AIInsightsService {
     if (stats.byType && stats.byType.length > 0) {
       // Take top 10 activity types
       const topTypes = stats.byType.slice(0, 10);
+      const labels = topTypes.map(type => (type._id || 'Unknown').replace(/_/g, ' '));
+      
       charts.push({
         type: 'horizontalBar',
         title: 'Top 10 Activity Types',
         description: 'Most common operations performed',
-        width: 100, // 100% of container width (full width for detailed list)
+        width: this.calculateChartWidth('horizontalBar', topTypes.length, labels),
         data: {
-          labels: topTypes.map(type => (type._id || 'Unknown').replace(/_/g, ' ')),
+          labels: labels,
           datasets: [{
             label: 'Count',
             values: topTypes.map(type => type.count),
@@ -288,7 +350,7 @@ class AIInsightsService {
         type: 'line',
         title: 'Activity Timeline (Last 7 Days)',
         description: 'Daily activity trend over the past week',
-        width: 100, // 100% of container width (full width for timeline)
+        width: this.calculateChartWidth('line', timelineData.dates.length, timelineData.dates, 1),
         data: {
           labels: timelineData.dates,
           datasets: [{
@@ -305,6 +367,7 @@ class AIInsightsService {
     // 4. Category Timeline - Multi-line Chart
     const categoryTimeline = this.generateCategoryTimelineData(activities);
     if (Object.keys(categoryTimeline).length > 0) {
+      const categoryCount = Object.keys(categoryTimeline).length;
       const datasets = Object.entries(categoryTimeline).map(([category, data], index) => ({
         label: category,
         values: data.counts,
@@ -312,13 +375,15 @@ class AIInsightsService {
         fill: false
       }));
 
+      const firstCategoryDates = categoryTimeline[Object.keys(categoryTimeline)[0]].dates;
+      
       charts.push({
         type: 'line',
         title: 'Activity Trends by Category',
         description: 'Compare activity trends across different categories',
-        width: 100, // 100% of container width (full width for multi-line comparison)
+        width: this.calculateChartWidth('line', firstCategoryDates.length, firstCategoryDates, categoryCount),
         data: {
-          labels: categoryTimeline[Object.keys(categoryTimeline)[0]].dates,
+          labels: firstCategoryDates,
           datasets: datasets
         }
       });
@@ -331,7 +396,7 @@ class AIInsightsService {
         type: 'heatmap',
         title: 'Activity Heatmap (Day vs Hour)',
         description: 'When activities occur throughout the week',
-        width: 100, // 100% of container width (full width for 24-hour grid)
+        width: this.calculateChartWidth('heatmap', 168), // 7 days * 24 hours
         data: heatmapData
       });
     }
@@ -467,6 +532,10 @@ Focus on:
 3. Growth indicators
 4. Potential issues or optimization opportunities
 5. User engagement patterns
+
+Note: Your insights will be displayed alongside interactive charts. Charts are intelligently sized based on their 
+complexity - simple visualizations may appear horizontally aligned for optimal space usage, while complex charts 
+with more data points will use full width for clarity. Keep your insights concise and actionable to complement the visual data.
 
 Return ONLY the JSON object, no additional text.`;
 

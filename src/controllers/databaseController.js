@@ -4117,23 +4117,6 @@ After appointment is booked:
                   }
                 }
               }
-            },
-            // Identify unresponsive chats
-            isUnresponsive: {
-                // Check if messages array has no messages with role 'agent'
-                  $eq: [
-                    {
-                      $size: {
-                        $filter: {
-                          input: { $ifNull: ['$messages', []] },
-                          as: 'msg',
-                          cond: { $eq: ['$$msg.role', 'agent'] }
-                        }
-                      }
-                    },
-                    0
-                  ]
-              
             }
           }
         },
@@ -4148,9 +4131,6 @@ After appointment is booked:
           $group: {
             _id: '$period',
             totalChats: { $sum: 1 },
-            unresponsiveChats: {
-              $sum: { $cond: ['$isUnresponsive', 1, 0] }
-            },
             chatIds: { $push: '$chat_id' }
           }
         },
@@ -4158,13 +4138,12 @@ After appointment is booked:
           $project: {
             _id: 1,
             totalChats: 1,
-            unresponsiveChats: 1,
             chatIds: 1
           }
         }
       ]).toArray();
 
-      // Get meetings count for both periods (successful chats = meetings booked)
+      // Get meetings count and unique chat IDs for both periods
       const meetingsAggregation = await meetingsCollection.aggregate([
         {
           $match: {
@@ -4210,7 +4189,22 @@ After appointment is booked:
         {
           $group: {
             _id: '$period',
-            count: { $sum: 1 }
+            totalMeetings: { $sum: 1 },
+            uniqueChatIds: { 
+              $addToSet: {
+                $cond: {
+                  if: { 
+                    $and: [
+                      { $ne: ['$chat_id', null] },
+                      { $ne: ['$chat_id', ''] },
+                      { $ne: [{ $type: '$chat_id' }, 'missing'] }
+                    ]
+                  },
+                  then: '$chat_id',
+                  else: '$$REMOVE'
+                }
+              }
+            }
           }
         }
       ]).toArray();
@@ -4218,34 +4212,40 @@ After appointment is booked:
       // Parse aggregation results
       const currentStatsRaw = statisticsAggregation.find(s => s._id === 'current') || {
         totalChats: 0,
-        unresponsiveChats: 0,
         chatIds: []
       };
 
       const previousStatsRaw = statisticsAggregation.find(s => s._id === 'previous') || {
         totalChats: 0,
-        unresponsiveChats: 0,
         chatIds: []
       };
 
-      // Parse meetings aggregation results (meetings booked = successful chats)
-      const currentPeriodMeetings = meetingsAggregation.find(m => m._id === 'current')?.count || 0;
-      const previousPeriodMeetings = meetingsAggregation.find(m => m._id === 'previous')?.count || 0;
+      // Parse meetings aggregation results
+      const currentMeetingsData = meetingsAggregation.find(m => m._id === 'current') || {
+        totalMeetings: 0,
+        uniqueChatIds: []
+      };
+      const previousMeetingsData = meetingsAggregation.find(m => m._id === 'previous') || {
+        totalMeetings: 0,
+        uniqueChatIds: []
+      };
 
-      // Combine stats with meetings count
+      // Combine stats with meetings data
       const currentStats = {
-        ...currentStatsRaw,
-        successfulChats: currentPeriodMeetings,
-        cumulativeSuccessRate: currentStatsRaw.totalChats > 0 
-          ? (currentPeriodMeetings / currentStatsRaw.totalChats) * 100 
+        totalChats: currentStatsRaw.totalChats,
+        meetingsBooked: currentMeetingsData.totalMeetings,
+        successfulChats: currentMeetingsData.uniqueChatIds.length,
+        successRate: currentStatsRaw.totalChats > 0 
+          ? (currentMeetingsData.uniqueChatIds.length / currentStatsRaw.totalChats) * 100 
           : 0
       };
 
       const previousStats = {
-        ...previousStatsRaw,
-        successfulChats: previousPeriodMeetings,
-        cumulativeSuccessRate: previousStatsRaw.totalChats > 0 
-          ? (previousPeriodMeetings / previousStatsRaw.totalChats) * 100 
+        totalChats: previousStatsRaw.totalChats,
+        meetingsBooked: previousMeetingsData.totalMeetings,
+        successfulChats: previousMeetingsData.uniqueChatIds.length,
+        successRate: previousStatsRaw.totalChats > 0 
+          ? (previousMeetingsData.uniqueChatIds.length / previousStatsRaw.totalChats) * 100 
           : 0
       };
 
@@ -4269,17 +4269,17 @@ After appointment is booked:
         },
         currentPeriod: {
           totalChats: currentStats.totalChats,
+          meetingsBooked: currentStats.meetingsBooked,
           successfulChats: currentStats.successfulChats,
-          unresponsiveChats: currentStats.unresponsiveChats,
-          cumulativeSuccessRate: Math.round(currentStats.cumulativeSuccessRate * 100) / 100,
+          successRate: Math.round(currentStats.successRate * 100) / 100,
           periodStart: currentPeriodStart,
           periodEnd: currentPeriodEnd
         },
         previousPeriod: {
           totalChats: previousStats.totalChats,
+          meetingsBooked: previousStats.meetingsBooked,
           successfulChats: previousStats.successfulChats,
-          unresponsiveChats: previousStats.unresponsiveChats,
-          cumulativeSuccessRate: Math.round(previousStats.cumulativeSuccessRate * 100) / 100,
+          successRate: Math.round(previousStats.successRate * 100) / 100,
           periodStart: previousPeriodStart,
           periodEnd: previousPeriodEnd
         },
@@ -4290,22 +4290,22 @@ After appointment is booked:
               calculatePercentageChange(currentStats.totalChats, previousStats.totalChats) * 100
             ) / 100
           },
+          meetingsBooked: {
+            change: currentStats.meetingsBooked - previousStats.meetingsBooked,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.meetingsBooked, previousStats.meetingsBooked) * 100
+            ) / 100
+          },
           successfulChats: {
             change: currentStats.successfulChats - previousStats.successfulChats,
             percentageChange: Math.round(
               calculatePercentageChange(currentStats.successfulChats, previousStats.successfulChats) * 100
             ) / 100
           },
-          unresponsiveChats: {
-            change: currentStats.unresponsiveChats - previousStats.unresponsiveChats,
+          successRate: {
+            change: Math.round((currentStats.successRate - previousStats.successRate) * 100) / 100,
             percentageChange: Math.round(
-              calculatePercentageChange(currentStats.unresponsiveChats, previousStats.unresponsiveChats) * 100
-            ) / 100
-          },
-          cumulativeSuccessRate: {
-            change: Math.round((currentStats.cumulativeSuccessRate - previousStats.cumulativeSuccessRate) * 100) / 100,
-            percentageChange: Math.round(
-              calculatePercentageChange(currentStats.cumulativeSuccessRate, previousStats.cumulativeSuccessRate) * 100
+              calculatePercentageChange(currentStats.successRate, previousStats.successRate) * 100
             ) / 100
           }
         }
@@ -4333,6 +4333,894 @@ After appointment is booked:
 
     } catch (error) {
       const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getChatAgentDetails', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get detailed chat analytics with timeline and distribution
+  static async getChatAgentAnalytics(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+      const { startDate, endDate, groupBy = 'day' } = req.query;
+
+      // Validate groupBy parameter
+      if (!['day', 'week', 'month'].includes(groupBy)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid groupBy parameter. Must be one of: day, week, month',
+          code: 'INVALID_GROUP_BY'
+        });
+      }
+
+      // Parse and validate dates
+      let periodStart, periodEnd;
+      const now = new Date();
+
+      if (startDate && endDate) {
+        periodStart = new Date(startDate);
+        periodEnd = new Date(endDate);
+
+        if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid date format. Use ISO 8601 format',
+            code: 'INVALID_DATE_FORMAT'
+          });
+        }
+
+        if (periodStart >= periodEnd) {
+          return res.status(400).json({
+            success: false,
+            message: 'startDate must be before endDate',
+            code: 'INVALID_DATE_RANGE'
+          });
+        }
+      } else {
+        // Default to last 30 days
+        periodEnd = now;
+        periodStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+
+      Logger.info('Fetching chat analytics', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+        groupBy
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get collections
+      const chatAgentsCollection = connection.db.collection('chatagents');
+      const chatsCollection = connection.db.collection('chats');
+      const meetingsCollection = connection.db.collection('meetings');
+
+      // Step 1: Find the chat agent
+      const agentDocument = await chatAgentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'CHAT_AGENT_NOT_FOUND'
+        });
+      }
+
+      // Step 2: Get all chats in the period
+      const chats = await chatsCollection.find({
+        agent_id: agentId,
+        start_timestamp: {
+          $gte: periodStart.getTime(),
+          $lte: periodEnd.getTime()
+        }
+      }).toArray();
+
+      // Step 3: Get meetings booked by this agent in the period
+      const meetings = await meetingsCollection.find({
+        subaccountId: subaccountId,
+        agentId: agentId,
+        createdAt: {
+          $gte: periodStart,
+          $lte: periodEnd
+        }
+      }).toArray();
+
+      // Step 4: Calculate summary statistics
+      const totalChats = chats.length;
+      const meetingsBooked = meetings.length;
+      
+      // Get unique chat IDs that resulted in meetings
+      const chatIdsWithMeetings = new Set(
+        meetings
+          .filter(m => m.chat_id)
+          .map(m => m.chat_id)
+      );
+      
+      const successfulChats = chatIdsWithMeetings.size;
+      const unsuccessfulChats = totalChats - successfulChats;
+      const successRate = totalChats > 0 ? (successfulChats / totalChats) * 100 : 0;
+
+      // Step 5: Build success timeline based on groupBy
+      const timelineMap = {};
+      
+      // Helper function to get the grouping key
+      const getGroupKey = (timestamp, groupByParam) => {
+        const date = new Date(timestamp);
+        
+        if (groupByParam === 'month') {
+          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        } else if (groupByParam === 'week') {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          return weekStart.toISOString().split('T')[0];
+        } else {
+          // day
+          return date.toISOString().split('T')[0];
+        }
+      };
+
+      // Initialize timeline entries
+      chats.forEach(chat => {
+        const key = getGroupKey(chat.start_timestamp, groupBy);
+        if (!timelineMap[key]) {
+          timelineMap[key] = {
+            date: key,
+            successful: 0,
+            unsuccessful: 0,
+            timestamp: new Date(key).getTime()
+          };
+        }
+        
+        if (chatIdsWithMeetings.has(chat.chat_id)) {
+          timelineMap[key].successful++;
+        } else {
+          timelineMap[key].unsuccessful++;
+        }
+      });
+
+      const successTimeline = Object.values(timelineMap).sort((a, b) => a.timestamp - b.timestamp);
+
+      // Step 6: Calculate peak hours (0-23)
+      const hourCounts = new Array(24).fill(0);
+      chats.forEach(chat => {
+        const date = new Date(chat.start_timestamp);
+        const hour = date.getHours();
+        hourCounts[hour]++;
+      });
+
+      const peakHours = hourCounts.map((count, hour) => ({
+        hour,
+        chatCount: count,
+        hourLabel: hour === 0 ? '12 AM' : 
+                   hour < 12 ? `${hour} AM` : 
+                   hour === 12 ? '12 PM' : 
+                   `${hour - 12} PM`
+      }));
+
+      // Step 7: Build outcome distribution
+      const outcomeDistribution = [
+        {
+          sentiment: 'Meeting Booked',
+          count: successfulChats,
+          percentage: totalChats > 0 ? Math.round((successfulChats / totalChats) * 10000) / 100 : 0
+        },
+        {
+          sentiment: 'No Meeting',
+          count: unsuccessfulChats,
+          percentage: totalChats > 0 ? Math.round((unsuccessfulChats / totalChats) * 10000) / 100 : 0
+        }
+      ];
+
+      // Build response
+      const analytics = {
+        agent: {
+          agentId: agentDocument.agentId,
+          name: agentDocument.name,
+          description: agentDocument.description,
+          voiceId: agentDocument.voiceId,
+          language: agentDocument.language,
+          createdAt: agentDocument.createdAt
+        },
+        dateRange: {
+          start: periodStart.toISOString(),
+          end: periodEnd.toISOString(),
+          groupBy
+        },
+        summary: {
+          totalChats,
+          successfulChats,
+          unsuccessfulChats,
+          successRate: Math.round(successRate * 100) / 100,
+          meetingsBooked
+        },
+        successTimeline,
+        peakHours,
+        outcomeDistribution
+      };
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Chat analytics retrieved successfully', {
+        operationId,
+        subaccountId,
+        agentId,
+        totalChats,
+        successfulChats,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Chat analytics retrieved successfully',
+        data: analytics,
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cached: false
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getChatAgentAnalytics', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get chat analytics stats with period comparison
+  static async getChatAnalyticsStats(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+      const { startDate, endDate } = req.query;
+
+      // Validate required parameters
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'startDate and endDate are required',
+          code: 'MISSING_REQUIRED_PARAMS'
+        });
+      }
+
+      // Parse and validate dates
+      const currentPeriodStart = new Date(startDate);
+      const currentPeriodEnd = new Date(endDate);
+
+      if (isNaN(currentPeriodStart.getTime()) || isNaN(currentPeriodEnd.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format. Use ISO 8601 format',
+          code: 'INVALID_DATE_FORMAT'
+        });
+      }
+
+      if (currentPeriodStart >= currentPeriodEnd) {
+        return res.status(400).json({
+          success: false,
+          message: 'startDate must be before endDate',
+          code: 'INVALID_DATE_RANGE'
+        });
+      }
+
+      // Calculate previous period (same duration)
+      const periodDuration = currentPeriodEnd - currentPeriodStart;
+      const previousPeriodEnd = currentPeriodStart;
+      const previousPeriodStart = new Date(currentPeriodStart.getTime() - periodDuration);
+
+      Logger.info('Fetching chat analytics stats', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        currentPeriodStart: currentPeriodStart.toISOString(),
+        currentPeriodEnd: currentPeriodEnd.toISOString(),
+        previousPeriodStart: previousPeriodStart.toISOString(),
+        previousPeriodEnd: previousPeriodEnd.toISOString()
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      const chatAgentsCollection = connection.db.collection('chatagents');
+      const chatsCollection = connection.db.collection('chats');
+      const meetingsCollection = connection.db.collection('meetings');
+
+      // Find the chat agent
+      const agentDocument = await chatAgentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'CHAT_AGENT_NOT_FOUND'
+        });
+      }
+
+      // Get chats for both periods using aggregation
+      const chatsAggregation = await chatsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: previousPeriodStart.getTime()
+            }
+          }
+        },
+        {
+          $addFields: {
+            period: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gte: ['$start_timestamp', currentPeriodStart.getTime()] },
+                    { $lte: ['$start_timestamp', currentPeriodEnd.getTime()] }
+                  ]
+                },
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$start_timestamp', previousPeriodStart.getTime()] },
+                        { $lt: ['$start_timestamp', previousPeriodEnd.getTime()] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
+              }
+            },
+            duration: {
+              $cond: {
+                if: { $and: [
+                  { $ne: [{ $type: '$end_timestamp' }, 'missing'] },
+                  { $ne: [{ $type: '$start_timestamp' }, 'missing'] }
+                ]},
+                then: { $divide: [{ $subtract: ['$end_timestamp', '$start_timestamp'] }, 1000] },
+                else: 0
+              }
+            },
+            isUnresponsive: {
+              $cond: {
+                if: {
+                  $or: [
+                    { $eq: ['$chat_status', 'failed'] },
+                    { $eq: ['$chat_status', 'error'] },
+                    {
+                      $eq: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: { $ifNull: ['$message_with_tool_calls', []] },
+                              as: 'msg',
+                              cond: { $eq: ['$$msg.role', 'agent'] }
+                            }
+                          }
+                        },
+                        0
+                      ]
+                    }
+                  ]
+                },
+                then: 1,
+                else: 0
+              }
+            }
+          }
+        },
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$period',
+            totalChats: { $sum: 1 },
+            unresponsiveChats: { $sum: '$isUnresponsive' },
+            totalCost: { $sum: { $divide: [{ $ifNull: ['$chat_cost.combined_cost', 0] }, 100] } },
+            totalDuration: { $sum: '$duration' },
+            chatsWithDuration: {
+              $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] }
+            }
+          }
+        }
+      ]).toArray();
+
+      // Get meetings for both periods
+      const meetingsAggregation = await meetingsCollection.aggregate([
+        {
+          $match: {
+            subaccountId: subaccountId,
+            agentId: agentId,
+            createdAt: {
+              $gte: previousPeriodStart
+            }
+          }
+        },
+        {
+          $addFields: {
+            period: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gte: ['$createdAt', currentPeriodStart] },
+                    { $lte: ['$createdAt', currentPeriodEnd] }
+                  ]
+                },
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$createdAt', previousPeriodStart] },
+                        { $lt: ['$createdAt', previousPeriodEnd] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$period',
+            totalMeetings: { $sum: 1 }
+          }
+        }
+      ]).toArray();
+
+      // Parse results
+      const currentChatsData = chatsAggregation.find(s => s._id === 'current') || {
+        totalChats: 0,
+        unresponsiveChats: 0,
+        totalCost: 0,
+        totalDuration: 0,
+        chatsWithDuration: 0
+      };
+
+      const previousChatsData = chatsAggregation.find(s => s._id === 'previous') || {
+        totalChats: 0,
+        unresponsiveChats: 0,
+        totalCost: 0,
+        totalDuration: 0,
+        chatsWithDuration: 0
+      };
+
+      const currentMeetingsData = meetingsAggregation.find(m => m._id === 'current') || { totalMeetings: 0 };
+      const previousMeetingsData = meetingsAggregation.find(m => m._id === 'previous') || { totalMeetings: 0 };
+
+      // Calculate metrics
+      const currentStats = {
+        totalChats: currentChatsData.totalChats,
+        meetingsBooked: currentMeetingsData.totalMeetings,
+        unresponsiveChats: currentChatsData.unresponsiveChats,
+        cumulativeSuccessRate: currentChatsData.totalChats > 0 
+          ? (currentMeetingsData.totalMeetings / currentChatsData.totalChats) * 100 
+          : 0,
+        costPerChat: currentChatsData.totalChats > 0 
+          ? currentChatsData.totalCost / currentChatsData.totalChats 
+          : 0,
+        avgChatDuration: currentChatsData.chatsWithDuration > 0 
+          ? currentChatsData.totalDuration / currentChatsData.chatsWithDuration 
+          : 0,
+        periodStart: currentPeriodStart,
+        periodEnd: currentPeriodEnd
+      };
+
+      const previousStats = {
+        totalChats: previousChatsData.totalChats,
+        meetingsBooked: previousMeetingsData.totalMeetings,
+        unresponsiveChats: previousChatsData.unresponsiveChats,
+        cumulativeSuccessRate: previousChatsData.totalChats > 0 
+          ? (previousMeetingsData.totalMeetings / previousChatsData.totalChats) * 100 
+          : 0,
+        costPerChat: previousChatsData.totalChats > 0 
+          ? previousChatsData.totalCost / previousChatsData.totalChats 
+          : 0,
+        avgChatDuration: previousChatsData.chatsWithDuration > 0 
+          ? previousChatsData.totalDuration / previousChatsData.chatsWithDuration 
+          : 0,
+        periodStart: previousPeriodStart,
+        periodEnd: previousPeriodEnd
+      };
+
+      // Calculate percentage changes
+      const calculatePercentageChange = (current, previous) => {
+        if (previous === 0) {
+          return current > 0 ? 100 : 0;
+        }
+        return ((current - previous) / previous) * 100;
+      };
+
+      const statistics = {
+        agent: {
+          agentId: agentDocument.agentId,
+          name: agentDocument.name,
+          description: agentDocument.description,
+          voiceId: agentDocument.voiceId || '',
+          language: agentDocument.language,
+          createdAt: agentDocument.createdAt
+        },
+        currentPeriod: {
+          totalChats: currentStats.totalChats,
+          meetingsBooked: currentStats.meetingsBooked,
+          unresponsiveChats: currentStats.unresponsiveChats,
+          cumulativeSuccessRate: Math.round(currentStats.cumulativeSuccessRate * 100) / 100,
+          costPerChat: Math.round(currentStats.costPerChat * 100) / 100,
+          avgChatDuration: Math.round(currentStats.avgChatDuration * 100) / 100,
+          periodStart: currentStats.periodStart.toISOString(),
+          periodEnd: currentStats.periodEnd.toISOString()
+        },
+        previousPeriod: {
+          totalChats: previousStats.totalChats,
+          meetingsBooked: previousStats.meetingsBooked,
+          unresponsiveChats: previousStats.unresponsiveChats,
+          cumulativeSuccessRate: Math.round(previousStats.cumulativeSuccessRate * 100) / 100,
+          costPerChat: Math.round(previousStats.costPerChat * 100) / 100,
+          avgChatDuration: Math.round(previousStats.avgChatDuration * 100) / 100,
+          periodStart: previousStats.periodStart.toISOString(),
+          periodEnd: previousStats.periodEnd.toISOString()
+        },
+        comparison: {
+          totalChats: {
+            change: currentStats.totalChats - previousStats.totalChats,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.totalChats, previousStats.totalChats) * 100
+            ) / 100
+          },
+          meetingsBooked: {
+            change: currentStats.meetingsBooked - previousStats.meetingsBooked,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.meetingsBooked, previousStats.meetingsBooked) * 100
+            ) / 100
+          },
+          unresponsiveChats: {
+            change: currentStats.unresponsiveChats - previousStats.unresponsiveChats,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.unresponsiveChats, previousStats.unresponsiveChats) * 100
+            ) / 100
+          },
+          cumulativeSuccessRate: {
+            change: Math.round((currentStats.cumulativeSuccessRate - previousStats.cumulativeSuccessRate) * 100) / 100,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.cumulativeSuccessRate, previousStats.cumulativeSuccessRate) * 100
+            ) / 100
+          },
+          costPerChat: {
+            change: Math.round((currentStats.costPerChat - previousStats.costPerChat) * 100) / 100,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.costPerChat, previousStats.costPerChat) * 100
+            ) / 100
+          },
+          avgChatDuration: {
+            change: Math.round((currentStats.avgChatDuration - previousStats.avgChatDuration) * 100) / 100,
+            percentageChange: Math.round(
+              calculatePercentageChange(currentStats.avgChatDuration, previousStats.avgChatDuration) * 100
+            ) / 100
+          }
+        }
+      };
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Chat analytics stats retrieved successfully', {
+        operationId,
+        subaccountId,
+        agentId,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Chat analytics stats retrieved successfully',
+        data: statistics,
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cached: false
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getChatAnalyticsStats', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get chat costs breakdown
+  static async getChatCostsBreakdown(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+      const { startDate, endDate } = req.query;
+
+      // Validate required parameters
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'startDate and endDate are required',
+          code: 'MISSING_REQUIRED_PARAMS'
+        });
+      }
+
+      // Parse and validate dates
+      const periodStart = new Date(startDate);
+      const periodEnd = new Date(endDate);
+
+      if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format. Use ISO 8601 format',
+          code: 'INVALID_DATE_FORMAT'
+        });
+      }
+
+      if (periodStart >= periodEnd) {
+        return res.status(400).json({
+          success: false,
+          message: 'startDate must be before endDate',
+          code: 'INVALID_DATE_RANGE'
+        });
+      }
+
+      Logger.info('Fetching chat costs breakdown', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString()
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      const chatAgentsCollection = connection.db.collection('chatagents');
+      const chatsCollection = connection.db.collection('chats');
+
+      // Find the chat agent
+      const agentDocument = await chatAgentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'CHAT_AGENT_NOT_FOUND'
+        });
+      }
+
+      // Get chats in the period
+      const chats = await chatsCollection.find({
+        agent_id: agentId,
+        start_timestamp: {
+          $gte: periodStart.getTime(),
+          $lte: periodEnd.getTime()
+        }
+      }).limit(100).toArray();
+
+      // Get all chats for summary (without limit)
+      const allChatsAggregation = await chatsCollection.aggregate([
+        {
+          $match: {
+            agent_id: agentId,
+            start_timestamp: {
+              $gte: periodStart.getTime(),
+              $lte: periodEnd.getTime()
+            }
+          }
+        },
+        {
+          $addFields: {
+            duration: {
+              $cond: {
+                if: { $and: [
+                  { $ne: [{ $type: '$end_timestamp' }, 'missing'] },
+                  { $ne: [{ $type: '$start_timestamp' }, 'missing'] }
+                ]},
+                then: { $divide: [{ $subtract: ['$end_timestamp', '$start_timestamp'] }, 1000] },
+                else: 0
+              }
+            },
+            hasCostData: {
+              $cond: {
+                if: { $ne: [{ $type: '$chat_cost' }, 'missing'] },
+                then: 1,
+                else: 0
+              }
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalChats: { $sum: 1 },
+            chatsWithCostData: { $sum: '$hasCostData' },
+            totalCombinedCost: { $sum: { $divide: [{ $ifNull: ['$chat_cost.combined_cost', 0] }, 100] } },
+            totalDuration: { $sum: '$duration' },
+            chatsWithDuration: {
+              $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] }
+            }
+          }
+        }
+      ]).toArray();
+
+      const summary = allChatsAggregation[0] || {
+        totalChats: 0,
+        chatsWithCostData: 0,
+        totalCombinedCost: 0,
+        totalDuration: 0,
+        chatsWithDuration: 0
+      };
+
+      // Build product breakdown
+      const productMap = new Map();
+      let totalProductCosts = 0;
+      
+      chats.forEach(chat => {
+        if (chat.chat_cost && chat.chat_cost.product_costs) {
+          chat.chat_cost.product_costs.forEach(pc => {
+            const existing = productMap.get(pc.product) || {
+              product: pc.product,
+              unitPrice: pc.unit_price || 0,
+              totalCost: 0,
+              chatCount: 0
+            };
+            
+            const costInDollars = (pc.cost || 0) / 100;
+            existing.totalCost += costInDollars;
+            existing.chatCount++;
+            productMap.set(pc.product, existing);
+            totalProductCosts += costInDollars;
+          });
+        }
+      });
+
+      const productBreakdown = Array.from(productMap.values()).map(p => ({
+        ...p,
+        avgCostPerChat: p.chatCount > 0 ? Math.round((p.totalCost / p.chatCount) * 10000) / 10000 : 0,
+        totalCost: Math.round(p.totalCost * 100) / 100
+      }));
+
+      // Build individual chats data
+      const chatsData = chats.map(chat => {
+        const duration = chat.end_timestamp && chat.start_timestamp 
+          ? (chat.end_timestamp - chat.start_timestamp) / 1000 
+          : 0;
+        
+        const combinedCostInCents = chat.chat_cost?.combined_cost || 0;
+        const combinedCost = combinedCostInCents / 100;
+        const durationUnitPrice = duration > 0 ? combinedCost / duration : 0;
+        
+        const productCosts = (chat.chat_cost?.product_costs || []).map(pc => ({
+          product: pc.product,
+          unitPrice: Math.round((pc.unit_price || 0) * 10000) / 10000,
+          cost: Math.round(((pc.cost || 0) / 100) * 100) / 100
+        }));
+
+        return {
+          chatId: chat.chat_id,
+          startTimestamp: chat.start_timestamp,
+          endTimestamp: chat.end_timestamp || chat.start_timestamp,
+          startDate: new Date(chat.start_timestamp).toISOString(),
+          endDate: new Date(chat.end_timestamp || chat.start_timestamp).toISOString(),
+          duration: Math.round(duration * 100) / 100,
+          combinedCost: Math.round(combinedCost * 100) / 100,
+          durationUnitPrice: Math.round(durationUnitPrice * 100000) / 100000,
+          productCosts
+        };
+      });
+
+      // Calculate averages
+      const avgDurationSeconds = summary.chatsWithDuration > 0 
+        ? summary.totalDuration / summary.chatsWithDuration 
+        : 0;
+      
+      const avgDurationUnitPrice = avgDurationSeconds > 0 
+        ? (summary.totalCombinedCost / summary.totalChats) / avgDurationSeconds 
+        : 0;
+
+      const totalDurationCost = summary.totalCombinedCost - totalProductCosts;
+
+      const breakdown = {
+        agent: {
+          agentId: agentDocument.agentId,
+          name: agentDocument.name,
+          description: agentDocument.description,
+          voiceId: agentDocument.voiceId || '',
+          language: agentDocument.language,
+          createdAt: agentDocument.createdAt
+        },
+        dateRange: {
+          start: periodStart.toISOString(),
+          end: periodEnd.toISOString()
+        },
+        summary: {
+          totalChats: summary.totalChats,
+          chatsWithCostData: summary.chatsWithCostData,
+          cumulativeCosts: {
+            totalCombinedCost: Math.round(summary.totalCombinedCost * 100) / 100,
+            totalProductCosts: Math.round(totalProductCosts * 100) / 100,
+            totalDurationCost: Math.round(totalDurationCost * 100) / 100,
+            avgCostPerChat: summary.totalChats > 0 
+              ? Math.round((summary.totalCombinedCost / summary.totalChats) * 10000) / 10000 
+              : 0
+          },
+          duration: {
+            totalDurationSeconds: Math.round(summary.totalDuration * 100) / 100,
+            avgDurationSeconds: Math.round(avgDurationSeconds * 100) / 100,
+            avgDurationUnitPrice: Math.round(avgDurationUnitPrice * 1000000) / 1000000
+          }
+        },
+        productBreakdown,
+        chats: {
+          count: chatsData.length,
+          limit: 100,
+          note: chatsData.length === 100 
+            ? 'Showing first 100 chats. Use pagination to retrieve more.' 
+            : `Showing all ${chatsData.length} chats.`,
+          data: chatsData
+        }
+      };
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Chat costs breakdown retrieved successfully', {
+        operationId,
+        subaccountId,
+        agentId,
+        totalChats: summary.totalChats,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Chat cost breakdown retrieved successfully',
+        data: breakdown,
+        meta: {
+          operationId,
+          duration: `${duration}ms`,
+          cached: false
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getChatCostsBreakdown', startTime);
       return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }

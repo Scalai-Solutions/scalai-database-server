@@ -32,6 +32,18 @@ const ACTIVITY_TYPES = {
   // Meeting activities
   MEETING_BOOKED: 'meeting_booked',
   
+  // WhatsApp activities
+  WHATSAPP_CONNECTED: 'whatsapp_connected',
+  WHATSAPP_DISCONNECTED: 'whatsapp_disconnected',
+  WHATSAPP_MESSAGE_SENT: 'whatsapp_message_sent',
+  WHATSAPP_MESSAGE_RECEIVED: 'whatsapp_message_received',
+  
+  // Instagram activities
+  INSTAGRAM_CONNECTED: 'instagram_connected',
+  INSTAGRAM_DISCONNECTED: 'instagram_disconnected',
+  INSTAGRAM_MESSAGE_SENT: 'instagram_message_sent',
+  INSTAGRAM_MESSAGE_RECEIVED: 'instagram_message_received',
+  
   // Connector activities
   CONNECTOR_ADDED: 'connector_added',
   CONNECTOR_UPDATED: 'connector_updated',

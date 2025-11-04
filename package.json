@@ -45,6 +45,8 @@
     "retell-sdk": "^4.49.0",
     "twilio": "^5.10.2",
     "uuid": "^9.0.1",
+    "whatsapp-web.js": "^1.25.0",
+    "qrcode": "^1.5.3",
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^4.7.1"
   },
