@@ -24,10 +24,32 @@ class WhatsAppConnector extends BaseChatConnector {
 
   /**
    * Initialize the WhatsApp connector
+   * @param {boolean} forceNew - If true, will destroy existing client and create a new one
    */
-  async initialize() {
+  async initialize(forceNew = false) {
     try {
-      if (this.client) {
+      // If forceNew is true, destroy existing client first
+      if (forceNew && this.client) {
+        try {
+          Logger.info('Force new: destroying existing client', {
+            sessionId: this.config.sessionId
+          });
+          await this.client.destroy();
+        } catch (error) {
+          Logger.warn('Error destroying existing client', {
+            error: error.message,
+            sessionId: this.config.sessionId
+          });
+        }
+        this.client = null;
+        this.isConnected = false;
+        this.isActive = false;
+        this.qrCode = null;
+        this.qrCodeDataUrl = null;
+        this.connectionPromise = null;
+      }
+
+      if (this.client && !forceNew) {
         Logger.warn('WhatsApp client already initialized', {
           sessionId: this.config.sessionId
         });
@@ -37,8 +59,38 @@ class WhatsAppConnector extends BaseChatConnector {
       Logger.info('Initializing WhatsApp connector', {
         subaccountId: this.config.subaccountId,
         agentId: this.config.agentId,
-        sessionId: this.config.sessionId
+        sessionId: this.config.sessionId,
+        forceNew
       });
+
+      // If forceNew, also clean up session files here as a double-check
+      if (forceNew) {
+        try {
+          const fs = require('fs').promises;
+          const sessionPath = path.join(__dirname, '../../.wwebjs_auth', this.config.sessionId);
+          
+          try {
+            await fs.rm(sessionPath, { recursive: true, force: true });
+            Logger.info('Session files deleted during connector initialization', {
+              sessionId: this.config.sessionId,
+              sessionPath
+            });
+          } catch (error) {
+            if (error.code !== 'ENOENT') {
+              Logger.warn('Could not delete session files during initialization', {
+                error: error.message,
+                sessionId: this.config.sessionId,
+                sessionPath
+              });
+            }
+          }
+        } catch (error) {
+          Logger.warn('Error during session cleanup in initialize', {
+            error: error.message,
+            sessionId: this.config.sessionId
+          });
+        }
+      }
 
       // Create client with session persistence
       this.client = new Client({
@@ -60,7 +112,8 @@ class WhatsAppConnector extends BaseChatConnector {
         }
       });
 
-      // Setup event listeners
+      // Setup event listeners FIRST, before initializing
+      // This ensures callbacks are registered before any events fire
       this.setupEventListeners();
 
       // Create a promise that resolves when client is ready or rejects on auth failure
@@ -82,7 +135,7 @@ class WhatsAppConnector extends BaseChatConnector {
         });
       });
 
-      // Initialize the client
+      // Initialize the client (this may trigger immediate ready event if session exists)
       await this.client.initialize();
 
       Logger.info('WhatsApp client initialization started', {
@@ -285,15 +338,55 @@ class WhatsAppConnector extends BaseChatConnector {
    */
   async getConnectionStatus() {
     try {
+      // First check if client is actually destroyed or null
+      if (!this.client) {
+        return this.formatSuccess({
+          isConnected: false,
+          isActive: false,
+          hasQR: false,
+          qrCodeDataUrl: null,
+          status: 'not_initialized'
+        }, 'getConnectionStatus');
+      }
+
+      // Check if client is actually ready and connected
+      let isActuallyConnected = false;
+      try {
+        // Try to get client info - if this fails, client is not connected
+        const info = await this.client.info;
+        isActuallyConnected = !!info && !!info.wid;
+      } catch (error) {
+        // Client info unavailable - not connected
+        Logger.debug('Client info unavailable, marking as disconnected', {
+          sessionId: this.config.sessionId,
+          error: error.message
+        });
+        this.isConnected = false;
+        this.isActive = false;
+        return this.formatSuccess({
+          isConnected: false,
+          isActive: false,
+          hasQR: false,
+          qrCodeDataUrl: null,
+          status: 'disconnected'
+        }, 'getConnectionStatus');
+      }
+
+      // Update internal state based on actual connection status
+      if (!isActuallyConnected) {
+        this.isConnected = false;
+        this.isActive = false;
+      }
+
       const status = {
-        isConnected: this.isConnected,
-        isActive: this.isActive,
+        isConnected: this.isConnected && isActuallyConnected,
+        isActive: this.isActive && isActuallyConnected,
         hasQR: !!this.qrCodeDataUrl,
         qrCodeDataUrl: this.qrCodeDataUrl || null
       };
 
       // If connected, get additional info
-      if (this.isConnected && this.client) {
+      if (status.isConnected && this.client) {
         try {
           const info = await this.client.info;
           status.phoneNumber = info.wid.user;
@@ -303,12 +396,24 @@ class WhatsAppConnector extends BaseChatConnector {
           Logger.warn('Could not fetch WhatsApp client info', {
             error: error.message
           });
+          // If we can't get info, assume not connected
+          status.isConnected = false;
+          status.isActive = false;
         }
       }
 
       return this.formatSuccess(status, 'getConnectionStatus');
     } catch (error) {
-      return this.handleError(error, 'getConnectionStatus');
+      // If there's an error, assume disconnected
+      this.isConnected = false;
+      this.isActive = false;
+      return this.formatSuccess({
+        isConnected: false,
+        isActive: false,
+        hasQR: false,
+        qrCodeDataUrl: null,
+        status: 'error'
+      }, 'getConnectionStatus');
     }
   }
 
@@ -323,14 +428,29 @@ class WhatsAppConnector extends BaseChatConnector {
         }, 'disconnect');
       }
 
-      await this.client.destroy();
+      Logger.info('Destroying WhatsApp client', {
+        sessionId: this.config.sessionId
+      });
+
+      // Destroy the client
+      try {
+        await this.client.destroy();
+      } catch (error) {
+        Logger.warn('Error destroying client, forcing cleanup', {
+          error: error.message,
+          sessionId: this.config.sessionId
+        });
+      }
+
+      // Clear all references
       this.client = null;
       this.isConnected = false;
       this.isActive = false;
       this.qrCode = null;
       this.qrCodeDataUrl = null;
+      this.connectionPromise = null;
 
-      Logger.info('WhatsApp client disconnected', {
+      Logger.info('WhatsApp client disconnected and cleaned up', {
         sessionId: this.config.sessionId
       });
 
@@ -338,6 +458,13 @@ class WhatsAppConnector extends BaseChatConnector {
         message: 'WhatsApp disconnected successfully'
       }, 'disconnect');
     } catch (error) {
+      // Even if disconnect fails, clear state
+      this.client = null;
+      this.isConnected = false;
+      this.isActive = false;
+      this.qrCode = null;
+      this.qrCodeDataUrl = null;
+      
       return this.handleError(error, 'disconnect');
     }
   }

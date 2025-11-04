@@ -89,13 +89,13 @@ const config = {
     // Per-user limits
     perUser: {
       windowMs: 60 * 1000, // 1 minute
-      max: 100 // 100 requests per minute per user
+      max: 500 // Increased from 100 to 500 requests per minute per user
     },
     
     // Per-subaccount limits
     perSubaccount: {
       windowMs: 60 * 1000,
-      max: 200 // 200 requests per minute per subaccount
+      max: 1000 // Increased from 200 to 1000 requests per minute per subaccount
     }
   },
   

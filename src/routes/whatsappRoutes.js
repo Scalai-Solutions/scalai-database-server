@@ -25,7 +25,7 @@ router.post('/:subaccountId/chat-agents/:agentId/whatsapp/connect',
   validateSubaccountId,
   requireConnector('whatsapp'),
   requireResourcePermission(),
-  subaccountLimiter(20, 60000),
+  subaccountLimiter(100, 60000), // Increased from 20 to 100 per minute
   WhatsAppController.connect
 );
 
@@ -34,7 +34,7 @@ router.get('/:subaccountId/chat-agents/:agentId/whatsapp/status',
   validateSubaccountId,
   requireConnector('whatsapp'),
   requireResourcePermission(),
-  subaccountLimiter(100, 60000),
+  subaccountLimiter(500, 60000), // Increased from 100 to 500 per minute
   WhatsAppController.getStatus
 );
 
@@ -43,7 +43,7 @@ router.post('/:subaccountId/chat-agents/:agentId/whatsapp/disconnect',
   validateSubaccountId,
   requireConnector('whatsapp'),
   requireResourcePermission(),
-  subaccountLimiter(20, 60000),
+  subaccountLimiter(100, 60000), // Increased from 20 to 100 per minute
   WhatsAppController.disconnect
 );
 
@@ -52,7 +52,7 @@ router.post('/:subaccountId/chat-agents/:agentId/whatsapp/send',
   validateSubaccountId,
   requireConnector('whatsapp'),
   requireResourcePermission(),
-  subaccountLimiter(200, 60000),
+  subaccountLimiter(1000, 60000), // Increased from 200 to 1000 per minute
   WhatsAppController.sendMessage
 );
 
@@ -61,7 +61,7 @@ router.get('/:subaccountId/chat-agents/:agentId/whatsapp/messages',
   validateSubaccountId,
   requireConnector('whatsapp'),
   requireResourcePermission(),
-  subaccountLimiter(100, 60000),
+  subaccountLimiter(500, 60000), // Increased from 100 to 500 per minute
   WhatsAppController.getMessages
 );
 
@@ -70,7 +70,7 @@ router.get('/:subaccountId/chat-agents/whatsapp/connections',
   validateSubaccountId,
   requireConnector('whatsapp'),
   requireResourcePermission(),
-  subaccountLimiter(50, 60000),
+  subaccountLimiter(200, 60000), // Increased from 50 to 200 per minute
   WhatsAppController.getConnections
 );
 

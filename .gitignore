@@ -21,6 +21,10 @@ pids/
 *.seed
 *.pid.lock
 
+# WhatsApp session cache
+.wwebjs_auth/
+.wwebjs_cache/
+
 # Coverage directory
 coverage/
 .nyc_output

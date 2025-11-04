@@ -46,6 +46,14 @@ class WhatsAppController {
       // Initialize WhatsApp connection
       const result = await whatsappService.initializeConnection(subaccountId, agentId, userId);
 
+      Logger.debug('WhatsApp initialization result', {
+        operationId,
+        hasResult: !!result,
+        hasData: !!(result && result.data),
+        resultKeys: result ? Object.keys(result) : [],
+        dataKeys: result && result.data ? Object.keys(result.data) : []
+      });
+
       // Log activity
       await ActivityService.logActivity({
         subaccountId,
@@ -56,7 +64,7 @@ class WhatsAppController {
         metadata: {
           agentId,
           agentName: agentDocument.name,
-          qrGenerated: true
+          qrGenerated: !!(result && result.data && result.data.qrCodeDataUrl)
         },
         resourceId: agentId,
         resourceName: `WhatsApp - ${agentDocument.name || agentId}`,
@@ -65,10 +73,33 @@ class WhatsAppController {
 
       const duration = Date.now() - startTime;
 
+      // Handle response structure - result may already be formatted or contain data property
+      // The formatSuccess returns: { success: true, connector: 'whatsapp', operation: 'generateQR', data: {...}, timestamp: ... }
+      const responseData = result?.data || result;
+
+      // Check if QR code was actually generated
+      if (!responseData || (!responseData.qrCode && !responseData.qrCodeDataUrl && !responseData.alreadyConnected)) {
+        Logger.warn('QR code data missing from response', {
+          operationId,
+          responseData,
+          result
+        });
+        
+        return res.status(500).json({
+          success: false,
+          message: 'QR code generation failed or timed out. Please try again.',
+          code: 'QR_GENERATION_FAILED',
+          meta: {
+            operationId,
+            duration: `${duration}ms`
+          }
+        });
+      }
+
       res.json({
         success: true,
         message: 'WhatsApp QR code generated. Scan with your mobile app.',
-        data: result.data,
+        data: responseData,
         meta: {
           operationId,
           duration: `${duration}ms`
@@ -147,9 +178,10 @@ class WhatsAppController {
         activityType: ACTIVITY_TYPES.WHATSAPP_DISCONNECTED,
         category: ACTIVITY_CATEGORIES.CHAT,
         userId,
-        description: `WhatsApp disconnected for agent ${agentId}`,
+        description: `WhatsApp disconnected for agent ${agentId}. All related data cleaned up.`,
         metadata: {
-          agentId
+          agentId,
+          cleanupCompleted: true
         },
         resourceId: agentId,
         resourceName: `WhatsApp - ${agentId}`,
@@ -160,8 +192,12 @@ class WhatsAppController {
 
       res.json({
         success: true,
-        message: 'WhatsApp disconnected successfully',
-        data: result.data || result,
+        message: result.message || 'WhatsApp disconnected successfully and all related data has been cleaned up',
+        data: {
+          disconnected: true,
+          cleanupCompleted: true,
+          ...result
+        },
         meta: {
           operationId,
           duration: `${duration}ms`

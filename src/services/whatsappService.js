@@ -15,10 +15,49 @@ class WhatsAppService {
 
   /**
    * Get or create WhatsApp connector for a subaccount/agent
+   * If forceNew is true, it will clean up any existing connector and session files first
    */
-  async getConnector(subaccountId, agentId, userId) {
+  async getConnector(subaccountId, agentId, userId, forceNew = false) {
     try {
       const sessionId = `${subaccountId}_${agentId}`;
+
+      // If forceNew is true, clean up existing connector and session files
+      if (forceNew) {
+        Logger.info('Force new connector requested, cleaning up existing session', {
+          sessionId,
+          subaccountId,
+          agentId
+        });
+
+        if (this.activeConnectors.has(sessionId)) {
+          const existingConnector = this.activeConnectors.get(sessionId);
+          try {
+            Logger.info('Disconnecting existing connector', { sessionId });
+            await existingConnector.disconnect();
+          } catch (error) {
+            Logger.warn('Error disconnecting existing connector', {
+              error: error.message,
+              sessionId
+            });
+          }
+          this.activeConnectors.delete(sessionId);
+          Logger.info('Existing connector removed from active connectors', { sessionId });
+        }
+
+        // Clean up session files BEFORE creating new connector
+        Logger.info('Cleaning up session files before creating new connector', { sessionId });
+        const cleanupResult = await this.cleanupSessionFiles(sessionId);
+        
+        Logger.info('Session cleanup completed', {
+          sessionId,
+          cleanupResult,
+          subaccountId,
+          agentId
+        });
+
+        // Wait a moment to ensure file system operations are complete
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
 
       // Check if connector already exists
       if (this.activeConnectors.has(sessionId)) {
@@ -44,7 +83,8 @@ class WhatsAppService {
       Logger.info('Created new WhatsApp connector', {
         sessionId,
         subaccountId,
-        agentId
+        agentId,
+        forceNew
       });
 
       return connector;
@@ -69,14 +109,27 @@ class WhatsAppService {
         userId
       });
 
-      const connector = await this.getConnector(subaccountId, agentId, userId);
+      // Always get a fresh connector - clean up any existing session first
+      const connector = await this.getConnector(subaccountId, agentId, userId, true);
 
-      // Setup callbacks to update database
+      // IMPORTANT: Setup callbacks BEFORE initializing to ensure they're registered
+      // before any events fire (especially if client auto-connects from cached session)
       connector.onReady(async () => {
+        Logger.info('WhatsApp ready callback triggered', {
+          subaccountId,
+          agentId,
+          userId
+        });
         await this.updateConnectionStatus(subaccountId, agentId, userId, 'connected');
       });
 
       connector.onDisconnect(async (reason) => {
+        Logger.info('WhatsApp disconnect callback triggered', {
+          subaccountId,
+          agentId,
+          userId,
+          reason
+        });
         await this.updateConnectionStatus(subaccountId, agentId, userId, 'disconnected', { reason });
       });
 
@@ -85,16 +138,70 @@ class WhatsAppService {
         await this.handleIncomingMessage(subaccountId, agentId, message);
       });
 
-      // Initialize connector (this will trigger QR generation)
-      await connector.initialize();
+      // Initialize connector (this will trigger QR generation or auto-connect if session exists)
+      // Pass forceNew=true to ensure we don't reuse existing client
+      await connector.initialize(true);
 
-      // Generate QR code
+      // Wait a moment for client to potentially auto-connect (if session exists)
+      // Then check actual connection status
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Check if already connected (auto-connected from cached session)
+      const currentStatus = await connector.getConnectionStatus();
+      const isAlreadyConnected = currentStatus.data && currentStatus.data.isConnected;
+
+      if (isAlreadyConnected) {
+        Logger.info('WhatsApp auto-connected from cached session', {
+          subaccountId,
+          agentId,
+          status: currentStatus.data
+        });
+        
+        // Update database with connection info
+        await this.updateConnectionStatus(subaccountId, agentId, userId, 'connected');
+        
+        await this.storeConnectionInfo(subaccountId, agentId, userId, {
+          status: 'connected',
+          phoneNumber: currentStatus.data.phoneNumber,
+          platform: currentStatus.data.platform,
+          pushname: currentStatus.data.pushname,
+          qrGenerated: false
+        });
+        
+        return {
+          success: true,
+          connector: 'whatsapp',
+          operation: 'generateQR',
+          data: {
+            alreadyConnected: true,
+            message: 'WhatsApp is already connected',
+            phoneNumber: currentStatus.data.phoneNumber,
+            platform: currentStatus.data.platform,
+            pushname: currentStatus.data.pushname
+          },
+          timestamp: new Date()
+        };
+      }
+
+      // Generate QR code (if not already connected)
       const qrResult = await connector.generateQR();
+
+      // Check if QR generation was successful
+      if (!qrResult || !qrResult.success) {
+        const errorMessage = qrResult?.error || 'QR code generation failed';
+        Logger.error('QR code generation failed', {
+          subaccountId,
+          agentId,
+          error: errorMessage,
+          qrResult
+        });
+        throw new Error(errorMessage);
+      }
 
       // Store connection info in database
       await this.storeConnectionInfo(subaccountId, agentId, userId, {
-        status: 'pending',
-        qrGenerated: true
+        status: qrResult.data?.alreadyConnected ? 'connected' : 'pending',
+        qrGenerated: !!(qrResult.data && qrResult.data.qrCodeDataUrl)
       });
 
       return qrResult;
@@ -115,19 +222,77 @@ class WhatsAppService {
     try {
       const sessionId = `${subaccountId}_${agentId}`;
 
-      // Check if connector exists
-      if (!this.activeConnectors.has(sessionId)) {
-        return {
-          success: true,
-          data: {
-            isConnected: false,
-            status: 'not_initialized'
-          }
-        };
+      // First check if connector exists in active connectors
+      if (this.activeConnectors.has(sessionId)) {
+        const connector = this.activeConnectors.get(sessionId);
+        const status = await connector.getConnectionStatus();
+        
+        // If connector shows as disconnected, remove it from active connectors
+        if (status.data && status.data.isConnected === false) {
+          Logger.info('Removing disconnected connector from active connectors', {
+            sessionId,
+            subaccountId,
+            agentId
+          });
+          this.activeConnectors.delete(sessionId);
+        }
+        
+        return status;
       }
 
-      const connector = this.activeConnectors.get(sessionId);
-      return await connector.getConnectionStatus();
+      // If no active connector, check database for connection record
+      // Note: After disconnect, the database record is deleted, so this should return not_initialized
+      try {
+        const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+        const { connection } = connectionInfo;
+        const whatsappConnectionsCollection = connection.db.collection('whatsappconnections');
+        
+        const connectionRecord = await whatsappConnectionsCollection.findOne({
+          subaccountId,
+          agentId
+        });
+
+        if (connectionRecord && connectionRecord.status === 'connected') {
+          // Connection record exists and shows as connected
+          // But connector is not in activeConnectors, so it's a stale record
+          Logger.warn('Found stale connection record in database', {
+            subaccountId,
+            agentId,
+            status: connectionRecord.status
+          });
+          
+          // Return disconnected status since connector is not active
+          return {
+            success: true,
+            data: {
+              isConnected: false,
+              isActive: false,
+              hasQR: false,
+              qrCodeDataUrl: null,
+              status: 'disconnected',
+              note: 'Connection record exists but connector is not active'
+            }
+          };
+        }
+      } catch (dbError) {
+        Logger.warn('Error checking database for connection status', {
+          error: dbError.message,
+          subaccountId,
+          agentId
+        });
+      }
+
+      // No connector and no database record - not connected
+      return {
+        success: true,
+        data: {
+          isConnected: false,
+          isActive: false,
+          hasQR: false,
+          qrCodeDataUrl: null,
+          status: 'not_initialized'
+        }
+      };
     } catch (error) {
       Logger.error('Error getting WhatsApp connection status', {
         error: error.message,
@@ -139,41 +304,281 @@ class WhatsAppService {
   }
 
   /**
-   * Disconnect WhatsApp
+   * Disconnect WhatsApp and clean up all related data
    */
   async disconnect(subaccountId, agentId, userId) {
     try {
       const sessionId = `${subaccountId}_${agentId}`;
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
 
-      if (!this.activeConnectors.has(sessionId)) {
-        return {
-          success: true,
-          message: 'WhatsApp not connected'
-        };
+      let clientDisconnected = false;
+
+      // Disconnect the WhatsApp client if it exists
+      if (this.activeConnectors.has(sessionId)) {
+        const connector = this.activeConnectors.get(sessionId);
+        try {
+          await connector.disconnect();
+          clientDisconnected = true;
+        } catch (error) {
+          Logger.warn('Error disconnecting WhatsApp client', {
+            error: error.message,
+            subaccountId,
+            agentId
+          });
+        }
+
+        // Always remove from active connectors, even if disconnect failed
+        this.activeConnectors.delete(sessionId);
+        
+        Logger.info('Connector removed from active connectors', {
+          sessionId,
+          subaccountId,
+          agentId
+        });
       }
 
-      const connector = this.activeConnectors.get(sessionId);
-      const result = await connector.disconnect();
+      // Always clean up database data (even if client wasn't active)
+      const cleanupResult = await this.cleanupWhatsAppData(connection, subaccountId, agentId, userId);
 
-      // Remove from active connectors
-      this.activeConnectors.delete(sessionId);
-
-      // Update database
-      await this.updateConnectionStatus(subaccountId, agentId, userId, 'disconnected');
-
-      Logger.info('WhatsApp disconnected', {
+      // Clean up session files - MUST happen after client is disconnected
+      Logger.info('Cleaning up session files after disconnect', { sessionId });
+      const sessionCleanupResult = await this.cleanupSessionFiles(sessionId);
+      
+      Logger.info('Session file cleanup completed', {
+        sessionId,
+        sessionCleanupResult,
         subaccountId,
         agentId
       });
 
-      return result;
+      // Wait a moment to ensure file system operations are complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      Logger.info('WhatsApp disconnected and data cleaned up', {
+        subaccountId,
+        agentId,
+        userId,
+        clientDisconnected,
+        cleanupResult,
+        sessionFilesCleaned: sessionCleanupResult
+      });
+
+      return {
+        success: true,
+        message: 'WhatsApp disconnected successfully and all related data has been cleaned up',
+        clientDisconnected,
+        ...cleanupResult
+      };
     } catch (error) {
       Logger.error('Error disconnecting WhatsApp', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId,
+        agentId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up WhatsApp-related data from database
+   */
+  async cleanupWhatsAppData(connection, subaccountId, agentId, userId) {
+    try {
+      // Delete WhatsApp connection record
+      const whatsappConnectionsCollection = connection.db.collection('whatsappconnections');
+      const deleteResult = await whatsappConnectionsCollection.deleteOne({
+        subaccountId,
+        agentId
+      });
+
+      Logger.info('WhatsApp connection record deleted', {
+        subaccountId,
+        agentId,
+        deletedCount: deleteResult.deletedCount
+      });
+
+      // Update active chat sessions to ended status
+      const chatsCollection = connection.db.collection('chats');
+      const updateResult = await chatsCollection.updateMany(
+        {
+          subaccountId,
+          agent_id: agentId,
+          'metadata.channel': 'whatsapp',
+          chat_status: 'ongoing'
+        },
+        {
+          $set: {
+            chat_status: 'ended',
+            end_timestamp: Date.now(),
+            updatedAt: new Date(),
+            endedBy: 'whatsapp-disconnect',
+            endedReason: 'WhatsApp connection disconnected'
+          }
+        }
+      );
+
+      Logger.info('WhatsApp chat sessions updated', {
+        subaccountId,
+        agentId,
+        updatedCount: updateResult.modifiedCount
+      });
+
+      return {
+        connectionDeleted: deleteResult.deletedCount > 0,
+        chatsUpdated: updateResult.modifiedCount
+      };
+    } catch (error) {
+      Logger.error('Error cleaning up WhatsApp data', {
         error: error.message,
         subaccountId,
         agentId
       });
       throw error;
+    }
+  }
+
+  /**
+   * Clean up WhatsApp session files from .wwebjs_auth directory
+   */
+  async cleanupSessionFiles(sessionId) {
+    try {
+      const path = require('path');
+      const fs = require('fs').promises;
+      const basePath = path.join(__dirname, '../../.wwebjs_auth');
+      
+      Logger.info('Starting session file cleanup', {
+        sessionId,
+        basePath
+      });
+
+      // Ensure base directory exists (if not, nothing to clean)
+      try {
+        await fs.access(basePath);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          Logger.info('Session base directory does not exist, nothing to clean', {
+            basePath
+          });
+          return false;
+        }
+        throw error;
+      }
+
+      // Clean up session directory (whatsapp-web.js uses clientId as directory name)
+      const sessionPath = path.join(basePath, sessionId);
+      
+      // Also check for any directories that might match (case-insensitive or with variations)
+      const possiblePaths = [
+        sessionPath,
+        path.join(basePath, sessionId.toLowerCase()),
+        path.join(basePath, sessionId.toUpperCase())
+      ];
+
+      let cleanedUp = false;
+
+      for (const sessionPathToCheck of possiblePaths) {
+        try {
+          // Check if session directory exists
+          const stats = await fs.stat(sessionPathToCheck);
+          
+          if (stats.isDirectory()) {
+            Logger.info('Found session directory, deleting', {
+              sessionId,
+              sessionPath: sessionPathToCheck
+            });
+            
+            // Remove session directory recursively
+            await fs.rm(sessionPathToCheck, { recursive: true, force: true });
+            cleanedUp = true;
+            
+            Logger.info('WhatsApp session files cleaned up successfully', {
+              sessionId,
+              sessionPath: sessionPathToCheck
+            });
+          }
+        } catch (error) {
+          // Session directory doesn't exist or already deleted - that's okay
+          if (error.code !== 'ENOENT') {
+            Logger.warn('Error checking/cleaning up session files', {
+              error: error.message,
+              sessionId,
+              sessionPath: sessionPathToCheck
+            });
+          }
+        }
+      }
+
+      // Also clean up any lock files or temp files
+      try {
+        const lockFile = path.join(basePath, `${sessionId}.lock`);
+        try {
+          await fs.unlink(lockFile);
+          Logger.debug('Removed session lock file', { sessionId, lockFile });
+        } catch (error) {
+          if (error.code !== 'ENOENT') {
+            Logger.warn('Error removing lock file', { error: error.message, lockFile });
+          }
+        }
+      } catch (error) {
+        // Ignore errors for lock file cleanup
+      }
+
+      // List all directories in base path to check for any remaining session files
+      try {
+        const entries = await fs.readdir(basePath, { withFileTypes: true });
+        const sessionDirs = entries
+          .filter(entry => entry.isDirectory() && entry.name.includes(sessionId))
+          .map(entry => entry.name);
+        
+        if (sessionDirs.length > 0) {
+          Logger.warn('Found additional session directories matching sessionId', {
+            sessionId,
+            directories: sessionDirs
+          });
+          
+          // Try to remove any matching directories
+          for (const dirName of sessionDirs) {
+            try {
+              const dirPath = path.join(basePath, dirName);
+              await fs.rm(dirPath, { recursive: true, force: true });
+              Logger.info('Removed additional session directory', {
+                sessionId,
+                directory: dirName
+              });
+            } catch (error) {
+              Logger.warn('Failed to remove additional session directory', {
+                sessionId,
+                directory: dirName,
+                error: error.message
+              });
+            }
+          }
+        }
+      } catch (error) {
+        Logger.warn('Error listing session directories', {
+          error: error.message,
+          basePath
+        });
+      }
+
+      if (!cleanedUp) {
+        Logger.warn('No session files found to clean up', {
+          sessionId,
+          basePath
+        });
+      }
+
+      return cleanedUp;
+    } catch (error) {
+      Logger.error('Error cleaning up session files', {
+        error: error.message,
+        stack: error.stack,
+        sessionId
+      });
+      // Don't throw - session cleanup failure shouldn't fail the disconnect
+      return false;
     }
   }
 
