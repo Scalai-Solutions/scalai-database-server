@@ -251,8 +251,8 @@ class KnowledgeBaseController {
   /**
    * Update agent's knowledge base IDs in both MongoDB and Retell LLM
    */
-  static async updateAgentKBIds(subaccountId, agentId, kbIds, connection, retell) {
-    const agentsCollection = connection.db.collection('agents');
+  static async updateAgentKBIds(subaccountId, agentId, kbIds, connection, retell, isChatAgent = false) {
+    const agentsCollection = connection.db.collection(isChatAgent ? 'chatagents' : 'agents');
     
     // Update MongoDB
     await agentsCollection.updateOne(
@@ -273,7 +273,8 @@ class KnowledgeBaseController {
         Logger.info('Updating agent LLM with KB IDs', {
           agentId,
           llmId: agent.llmId,
-          kbIds
+          kbIds,
+          isChatAgent
         });
         
         await retell.updateLLM(agent.llmId, {
@@ -282,7 +283,8 @@ class KnowledgeBaseController {
         
         Logger.info('Agent LLM updated with KB IDs successfully', {
           agentId,
-          llmId: agent.llmId
+          llmId: agent.llmId,
+          isChatAgent
         });
       }
     } catch (llmError) {
@@ -290,7 +292,8 @@ class KnowledgeBaseController {
       Logger.error('Failed to update Retell LLM with KB IDs', {
         agentId,
         error: llmError.message,
-        kbIds
+        kbIds,
+        isChatAgent
       });
     }
   }
@@ -413,10 +416,14 @@ class KnowledgeBaseController {
         if (scope === SCOPE_TYPES.GLOBAL) {
           result = await KnowledgeBaseController.getOrCreateGlobalKB(subaccountId, userId, retell, connection, sources);
         } else {
-          // Verify agent exists
+          // Verify agent exists (check both regular agents and chat agents)
           const agentsCollection = connection.db.collection('agents');
+          const chatAgentsCollection = connection.db.collection('chatagents');
+          
           const agent = await agentsCollection.findOne({ subaccountId, agentId });
-          if (!agent) {
+          const chatAgent = await chatAgentsCollection.findOne({ subaccountId, agentId });
+          
+          if (!agent && !chatAgent) {
             // Clean up uploaded file if exists
             if (file && file.path && fs.existsSync(file.path)) {
               fs.unlinkSync(file.path);
@@ -454,10 +461,14 @@ class KnowledgeBaseController {
         kb = existingKB;
         
         if (scope === SCOPE_TYPES.LOCAL) {
-          // Verify agent exists
+          // Verify agent exists (check both regular agents and chat agents)
           const agentsCollection = connection.db.collection('agents');
+          const chatAgentsCollection = connection.db.collection('chatagents');
+          
           const agent = await agentsCollection.findOne({ subaccountId, agentId });
-          if (!agent) {
+          const chatAgent = await chatAgentsCollection.findOne({ subaccountId, agentId });
+          
+          if (!agent && !chatAgent) {
             // Clean up uploaded file if exists
             if (file && file.path && fs.existsSync(file.path)) {
               fs.unlinkSync(file.path);
@@ -584,21 +595,43 @@ class KnowledgeBaseController {
       if (scope === SCOPE_TYPES.LOCAL) {
         const globalResult = await KnowledgeBaseController.getOrCreateGlobalKB(subaccountId, userId, retell, connection);
         const kbIds = [globalResult.kb.knowledgeBaseId, kb.knowledgeBaseId];
-        await KnowledgeBaseController.updateAgentKBIds(subaccountId, agentId, kbIds, connection, retell);
+        
+        // Determine if this is a chat agent or regular agent
+        const agentsCollection = connection.db.collection('agents');
+        const chatAgentsCollection = connection.db.collection('chatagents');
+        const agent = await agentsCollection.findOne({ subaccountId, agentId });
+        const chatAgent = await chatAgentsCollection.findOne({ subaccountId, agentId });
+        const isChatAgent = !!chatAgent && !agent;
+        
+        await KnowledgeBaseController.updateAgentKBIds(subaccountId, agentId, kbIds, connection, retell, isChatAgent);
         
         // Invalidate agent cache
         await redisService.invalidateAgentDetails(subaccountId, agentId);
       } else {
-        // Update all agents with global KB ID
+        // Update all agents (both regular and chat agents) with global KB ID
         const agentsCollection = connection.db.collection('agents');
-        const agents = await agentsCollection.find({ subaccountId }).toArray();
+        const chatAgentsCollection = connection.db.collection('chatagents');
         
+        const agents = await agentsCollection.find({ subaccountId }).toArray();
+        const chatAgents = await chatAgentsCollection.find({ subaccountId }).toArray();
+        
+        // Update regular agents
         for (const agent of agents) {
           const existingKBIds = agent.knowledgeBaseIds || [];
           if (!existingKBIds.includes(kb.knowledgeBaseId)) {
             existingKBIds.unshift(kb.knowledgeBaseId); // Add global KB at start
-            await KnowledgeBaseController.updateAgentKBIds(subaccountId, agent.agentId, existingKBIds, connection, retell);
+            await KnowledgeBaseController.updateAgentKBIds(subaccountId, agent.agentId, existingKBIds, connection, retell, false);
             await redisService.invalidateAgentDetails(subaccountId, agent.agentId);
+          }
+        }
+        
+        // Update chat agents
+        for (const chatAgent of chatAgents) {
+          const existingKBIds = chatAgent.knowledgeBaseIds || [];
+          if (!existingKBIds.includes(kb.knowledgeBaseId)) {
+            existingKBIds.unshift(kb.knowledgeBaseId); // Add global KB at start
+            await KnowledgeBaseController.updateAgentKBIds(subaccountId, chatAgent.agentId, existingKBIds, connection, retell, true);
+            await redisService.invalidateAgentDetails(subaccountId, chatAgent.agentId);
           }
         }
       }
@@ -1270,10 +1303,14 @@ class KnowledgeBaseController {
         const result = await KnowledgeBaseController.getOrCreateGlobalKB(subaccountId, userId, retell, connection);
         targetKB = result.kb;
       } else {
-        // Verify agent exists
+        // Verify agent exists (check both regular agents and chat agents)
         const agentsCollection = connection.db.collection('agents');
+        const chatAgentsCollection = connection.db.collection('chatagents');
+        
         const agent = await agentsCollection.findOne({ subaccountId, agentId });
-        if (!agent) {
+        const chatAgent = await chatAgentsCollection.findOne({ subaccountId, agentId });
+        
+        if (!agent && !chatAgent) {
           return res.status(404).json({
             success: false,
             message: 'Agent not found',
@@ -1336,21 +1373,42 @@ class KnowledgeBaseController {
 
       // Update agent KB IDs as needed
       const agentsCollection = connection.db.collection('agents');
+      const chatAgentsCollection = connection.db.collection('chatagents');
+      
       if (scope === SCOPE_TYPES.LOCAL) {
         // Add local KB to specific agent
         const globalResult = await KnowledgeBaseController.getOrCreateGlobalKB(subaccountId, userId, retell, connection);
-        await KnowledgeBaseController.updateAgentKBIds(subaccountId, agentId, [globalResult.kb.knowledgeBaseId, targetKB.knowledgeBaseId], connection, retell);
+        
+        // Determine if this is a chat agent or regular agent
+        const agent = await agentsCollection.findOne({ subaccountId, agentId });
+        const chatAgent = await chatAgentsCollection.findOne({ subaccountId, agentId });
+        const isChatAgent = !!chatAgent && !agent;
+        
+        await KnowledgeBaseController.updateAgentKBIds(subaccountId, agentId, [globalResult.kb.knowledgeBaseId, targetKB.knowledgeBaseId], connection, retell, isChatAgent);
         await redisService.invalidateAgentDetails(subaccountId, agentId);
       } else {
-        // Update all agents with global KB
+        // Update all agents (both regular and chat agents) with global KB
         const agents = await agentsCollection.find({ subaccountId }).toArray();
+        const chatAgents = await chatAgentsCollection.find({ subaccountId }).toArray();
+        
+        // Update regular agents
         for (const agent of agents) {
           const existingKBIds = agent.knowledgeBaseIds || [];
           if (!existingKBIds.includes(targetKB.knowledgeBaseId)) {
             existingKBIds.unshift(targetKB.knowledgeBaseId);
-            await KnowledgeBaseController.updateAgentKBIds(subaccountId, agent.agentId, existingKBIds, connection, retell);
+            await KnowledgeBaseController.updateAgentKBIds(subaccountId, agent.agentId, existingKBIds, connection, retell, false);
           }
           await redisService.invalidateAgentDetails(subaccountId, agent.agentId);
+        }
+        
+        // Update chat agents
+        for (const chatAgent of chatAgents) {
+          const existingKBIds = chatAgent.knowledgeBaseIds || [];
+          if (!existingKBIds.includes(targetKB.knowledgeBaseId)) {
+            existingKBIds.unshift(targetKB.knowledgeBaseId);
+            await KnowledgeBaseController.updateAgentKBIds(subaccountId, chatAgent.agentId, existingKBIds, connection, retell, true);
+          }
+          await redisService.invalidateAgentDetails(subaccountId, chatAgent.agentId);
         }
       }
 
@@ -1401,6 +1459,111 @@ class KnowledgeBaseController {
 
     } catch (error) {
       const errorInfo = await KnowledgeBaseController.handleError(error, req, operationId, 'updateResourceScope', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get local knowledge base for a chat agent
+  static async getChatAgentLocalKB(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user.id;
+
+      Logger.info('Fetching local knowledge base for chat agent', {
+        operationId,
+        subaccountId,
+        agentId,
+        userId
+      });
+
+      // Check cache
+      try {
+        const cachedKB = await redisService.getCachedKnowledgeBase(subaccountId, SCOPE_TYPES.LOCAL, agentId);
+        if (cachedKB) {
+          const duration = Date.now() - startTime;
+          return res.json({
+            success: true,
+            message: 'Local knowledge base fetched successfully',
+            data: cachedKB,
+            meta: { operationId, duration: `${duration}ms`, cached: true }
+          });
+        }
+      } catch (cacheError) {
+        Logger.warn('Cache fetch failed', { operationId, error: cacheError.message });
+      }
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Verify chat agent exists
+      const chatAgentsCollection = connection.db.collection('chatagents');
+      const agent = await chatAgentsCollection.findOne({ subaccountId, agentId });
+      if (!agent) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'CHAT_AGENT_NOT_FOUND'
+        });
+      }
+
+      // Fetch local KB
+      const kbCollection = connection.db.collection('knowledge_bases');
+      const localKB = await kbCollection.findOne({
+        subaccountId: subaccountId,
+        type: SCOPE_TYPES.LOCAL,
+        agentId: agentId
+      });
+
+      // If no KB exists yet, return empty structure
+      const kbData = localKB ? {
+        knowledgeBaseId: localKB.knowledgeBaseId,
+        knowledgeBaseName: localKB.knowledgeBaseName,
+        type: localKB.type,
+        agentId: localKB.agentId,
+        resources: localKB.resources || [],
+        resourceCount: (localKB.resources || []).length,
+        createdAt: localKB.createdAt,
+        updatedAt: localKB.updatedAt
+      } : {
+        knowledgeBaseId: null,
+        knowledgeBaseName: null,
+        type: SCOPE_TYPES.LOCAL,
+        agentId: agentId,
+        resources: [],
+        resourceCount: 0,
+        createdAt: null,
+        updatedAt: null
+      };
+
+      // Cache the result
+      try {
+        await redisService.cacheKnowledgeBase(subaccountId, SCOPE_TYPES.LOCAL, agentId, kbData);
+      } catch (cacheError) {
+        Logger.warn('Cache write failed', { operationId, error: cacheError.message });
+      }
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Local knowledge base fetched successfully for chat agent', {
+        operationId,
+        agentId,
+        resourceCount: kbData.resourceCount,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Local knowledge base fetched successfully',
+        data: kbData,
+        meta: { operationId, duration: `${duration}ms`, cached: false }
+      });
+
+    } catch (error) {
+      const errorInfo = await KnowledgeBaseController.handleError(error, req, operationId, 'getChatAgentLocalKB', startTime);
       return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }

@@ -117,15 +117,17 @@ class EncryptionService {
    * @param {Object} config - The config object to encrypt
    * @param {string} connectorType - The connector type
    * @param {Array<string>} fieldsToEncrypt - Optional: specific fields to encrypt. If not provided, encrypts all string fields.
-   * @returns {Object} Config object with encrypted fields and metadata
+   * @returns {Object|Object} For Twilio: { config, metadata }, For others: config object with encrypted fields and metadata
    */
   encryptConfig(config, connectorType, fieldsToEncrypt = null) {
     try {
       if (!config || typeof config !== 'object') {
-        return config;
+        return connectorType === 'twilio' ? { config, metadata: {} } : config;
       }
 
       const encryptedConfig = { ...config };
+      const isTwilio = connectorType === 'twilio';
+      const encryptionMetadata = {}; // For Twilio, store metadata separately
       
       // Determine which fields to encrypt
       const fields = fieldsToEncrypt || Object.keys(config).filter(key => {
@@ -156,9 +158,16 @@ class EncryptionService {
           // Store encrypted value
           encryptedConfig[field] = encrypted.encrypted;
           
-          // Store encryption metadata with field-specific keys
-          encryptedConfig[`${field}IV`] = encrypted.iv;
-          encryptedConfig[`${field}AuthTag`] = encrypted.authTag;
+          // For Twilio connectors, store encryption metadata separately
+          // For other connectors, store directly in config (backward compatibility)
+          if (isTwilio) {
+            encryptionMetadata[`${field}IV`] = encrypted.iv;
+            encryptionMetadata[`${field}AuthTag`] = encrypted.authTag;
+          } else {
+            // Store encryption metadata with field-specific keys (backward compatible)
+            encryptedConfig[`${field}IV`] = encrypted.iv;
+            encryptedConfig[`${field}AuthTag`] = encrypted.authTag;
+          }
           
           Logger.debug(`Field '${field}' encrypted successfully`, { connectorType });
         } catch (fieldError) {
@@ -168,6 +177,14 @@ class EncryptionService {
           });
           // Continue with other fields even if one fails
         }
+      }
+
+      // For Twilio, return config and metadata separately
+      if (isTwilio) {
+        return {
+          config: encryptedConfig,
+          metadata: encryptionMetadata
+        };
       }
 
       return encryptedConfig;
@@ -184,33 +201,66 @@ class EncryptionService {
    * Decrypt all encrypted fields in a connector's config object
    * @param {Object} config - The config object with encrypted fields
    * @param {string} connectorType - The connector type
+   * @param {Object} documentMetadata - Optional: document-level metadata (for Twilio connectors)
    * @returns {Object} Config object with decrypted fields (metadata removed)
    */
-  decryptConfig(config, connectorType) {
+  decryptConfig(config, connectorType, documentMetadata = null) {
     try {
       if (!config || typeof config !== 'object') {
         return config;
       }
 
       const decryptedConfig = { ...config };
+      const isTwilio = connectorType === 'twilio';
+      
+      // For Twilio connectors, use document-level metadata if provided, otherwise check config (backward compatibility)
+      // For other connectors, check config directly
+      const metadataSource = isTwilio && documentMetadata ? documentMetadata : 
+                            (isTwilio && config.metadata ? config.metadata : config);
       
       // Find all fields that have encryption metadata
       const encryptedFields = Object.keys(config).filter(key => {
-        // Find keys that have corresponding IV and AuthTag
-        return config[`${key}IV`] && config[`${key}AuthTag`] && 
-               !key.endsWith('IV') && !key.endsWith('AuthTag');
+        // Skip metadata object itself and fields ending with IV/AuthTag
+        if (key === 'metadata' || key.endsWith('IV') || key.endsWith('AuthTag')) {
+          return false;
+        }
+        
+        // For Twilio, check document metadata, config.metadata, or config root (backward compatibility)
+        if (isTwilio) {
+          return (documentMetadata && documentMetadata[`${key}IV`] && documentMetadata[`${key}AuthTag`]) ||
+                 (config.metadata && config.metadata[`${key}IV`] && config.metadata[`${key}AuthTag`]) ||
+                 (config[`${key}IV`] && config[`${key}AuthTag`]);
+        } else {
+          // For other connectors, check config directly
+          return config[`${key}IV`] && config[`${key}AuthTag`];
+        }
       });
 
       Logger.debug('Decrypting config fields', {
         connectorType,
         fieldCount: encryptedFields.length,
-        fields: encryptedFields
+        fields: encryptedFields,
+        isTwilio,
+        hasDocumentMetadata: isTwilio && !!documentMetadata,
+        hasConfigMetadata: isTwilio && !!config.metadata
       });
 
       for (const field of encryptedFields) {
         const encrypted = config[field];
-        const iv = config[`${field}IV`];
-        const authTag = config[`${field}AuthTag`];
+        
+        // For Twilio, try document metadata first, then config.metadata, then config root (backward compatibility)
+        let iv, authTag;
+        if (isTwilio) {
+          iv = (documentMetadata && documentMetadata[`${field}IV`]) ||
+               (config.metadata && config.metadata[`${field}IV`]) ||
+               config[`${field}IV`];
+          authTag = (documentMetadata && documentMetadata[`${field}AuthTag`]) ||
+                    (config.metadata && config.metadata[`${field}AuthTag`]) ||
+                    config[`${field}AuthTag`];
+        } else {
+          iv = config[`${field}IV`];
+          authTag = config[`${field}AuthTag`];
+        }
 
         if (!encrypted || !iv || !authTag) {
           Logger.warn(`Missing encryption metadata for field '${field}'`, { connectorType });
@@ -221,9 +271,20 @@ class EncryptionService {
           const decrypted = this.decryptField(encrypted, iv, authTag, connectorType);
           decryptedConfig[field] = decrypted;
           
-          // Remove encryption metadata
+          // Remove encryption metadata from config (if present)
           delete decryptedConfig[`${field}IV`];
           delete decryptedConfig[`${field}AuthTag`];
+          
+          // For Twilio, also remove from config.metadata if it exists there (backward compatibility)
+          if (isTwilio && decryptedConfig.metadata) {
+            delete decryptedConfig.metadata[`${field}IV`];
+            delete decryptedConfig.metadata[`${field}AuthTag`];
+            
+            // Remove metadata object if it's empty
+            if (Object.keys(decryptedConfig.metadata).length === 0) {
+              delete decryptedConfig.metadata;
+            }
+          }
           
           Logger.debug(`Field '${field}' decrypted successfully`, { connectorType });
         } catch (fieldError) {

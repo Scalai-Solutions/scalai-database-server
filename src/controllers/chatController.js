@@ -631,6 +631,131 @@ class ChatController {
   }
 
   /**
+   * Delete a chat
+   * DELETE /api/chats/:subaccountId/:chatId
+   */
+  static async deleteChat(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, chatId } = req.params;
+      const userId = req.user.id;
+
+      Logger.info('Deleting chat', {
+        operationId,
+        subaccountId,
+        userId,
+        chatId
+      });
+
+      // Verify chat exists in database
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+      
+      const chatsCollection = connection.db.collection('chats');
+      const chatDocument = await chatsCollection.findOne({ 
+        chat_id: chatId,
+        subaccountId: subaccountId 
+      });
+
+      if (!chatDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat not found',
+          code: 'CHAT_NOT_FOUND'
+        });
+      }
+
+      // If chat is still ongoing, end it first before deleting
+      if (chatDocument.chat_status === 'ongoing') {
+        Logger.info('Ending ongoing chat before deletion', {
+          operationId,
+          chatId
+        });
+
+        try {
+          const retellAccountData = await retellService.getRetellAccount(subaccountId);
+          
+          if (retellAccountData.isActive) {
+            const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+            await retell.endChat(chatId);
+            Logger.info('Chat ended in Retell before deletion', { chatId });
+          }
+        } catch (endError) {
+          Logger.warn('Failed to end chat in Retell before deletion, continuing with delete', {
+            chatId,
+            error: endError.message
+          });
+          // Continue with deletion even if ending fails
+        }
+      }
+
+      // Delete chat from database
+      const deleteResult = await chatsCollection.deleteOne({
+        chat_id: chatId,
+        subaccountId: subaccountId
+      });
+
+      if (deleteResult.deletedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat not found',
+          code: 'CHAT_NOT_FOUND'
+        });
+      }
+
+      // Invalidate caches
+      await redisService.invalidateChat(subaccountId, chatId);
+      await redisService.invalidateChatList(subaccountId);
+
+      Logger.info('Chat deleted successfully', {
+        operationId,
+        subaccountId,
+        chatId
+      });
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.CHAT_ENDED, // Using CHAT_ENDED as CHAT_DELETED might not exist
+        category: ACTIVITY_CATEGORIES.CHAT,
+        userId,
+        description: `Chat ${chatId} deleted`,
+        metadata: {
+          chatId,
+          agentId: chatDocument.agent_id,
+          messageCount: chatDocument.message_count,
+          chatStatus: chatDocument.chat_status,
+          deleted: true
+        },
+        resourceId: chatId,
+        resourceName: `Chat ${chatId}`,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      res.json({
+        success: true,
+        message: 'Chat deleted successfully',
+        data: {
+          chat_id: chatId,
+          deleted: true
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await ChatController.handleError(error, req, operationId, 'deleteChat', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
    * Error handling
    */
   static async handleError(error, req, operationId, operation, startTime) {
@@ -678,6 +803,10 @@ class ChatController {
       statusCode = 503;
       errorCode = 'CHAT_LIST_FAILED';
       message = 'Failed to list chats. Please try again later.';
+    } else if (error.message.includes('not found')) {
+      statusCode = 404;
+      errorCode = 'CHAT_NOT_FOUND';
+      message = 'Chat not found';
     } else if (error.message.includes('Failed to create connection pool')) {
       statusCode = 503;
       errorCode = 'CONNECTION_FAILED';

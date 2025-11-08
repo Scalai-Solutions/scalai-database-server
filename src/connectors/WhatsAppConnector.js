@@ -117,22 +117,78 @@ class WhatsAppConnector extends BaseChatConnector {
       this.setupEventListeners();
 
       // Create a promise that resolves when client is ready or rejects on auth failure
+      let timeoutHandle = null;
+      let readyHandler = null;
+      let authFailureHandler = null;
+      
       this.connectionPromise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
+        timeoutHandle = setTimeout(() => {
+          // Clean up event listeners to prevent memory leaks
+          try {
+            if (this.client && readyHandler) {
+              this.client.removeListener('ready', readyHandler);
+            }
+            if (this.client && authFailureHandler) {
+              this.client.removeListener('auth_failure', authFailureHandler);
+            }
+          } catch (cleanupError) {
+            Logger.warn('Error cleaning up event listeners on timeout', {
+              error: cleanupError.message,
+              sessionId: this.config.sessionId
+            });
+          }
+          
+          // Update state
+          this.isConnected = false;
+          this.isActive = false;
+          
+          // Log the timeout
+          Logger.warn('WhatsApp connection timeout', {
+            sessionId: this.config.sessionId,
+            timeoutMs: 120000
+          });
+          
+          // Reject with error
           reject(new Error('WhatsApp connection timeout'));
         }, 120000); // 2 minutes timeout
 
-        this.client.once('ready', () => {
-          clearTimeout(timeout);
+        readyHandler = () => {
+          if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+            timeoutHandle = null;
+          }
           this.isConnected = true;
           this.isActive = true;
           resolve(true);
-        });
+        };
 
-        this.client.once('auth_failure', (msg) => {
-          clearTimeout(timeout);
+        authFailureHandler = (msg) => {
+          if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+            timeoutHandle = null;
+          }
+          this.isConnected = false;
+          this.isActive = false;
           reject(new Error(`WhatsApp authentication failed: ${msg}`));
+        };
+
+        this.client.once('ready', readyHandler);
+        this.client.once('auth_failure', authFailureHandler);
+      });
+
+      // Add error handler to prevent unhandled promise rejections
+      this.connectionPromise.catch((error) => {
+        // This catch prevents unhandled promise rejection crashes
+        Logger.error('WhatsApp connection promise rejected', {
+          error: error.message,
+          sessionId: this.config.sessionId,
+          stack: error.stack
         });
+        // Update state
+        this.isConnected = false;
+        this.isActive = false;
+        // Clear the promise reference so a new one can be created
+        this.connectionPromise = null;
       });
 
       // Initialize the client (this may trigger immediate ready event if session exists)
@@ -600,7 +656,16 @@ class WhatsAppConnector extends BaseChatConnector {
     }
 
     if (this.connectionPromise) {
-      return await this.connectionPromise;
+      try {
+        return await this.connectionPromise;
+      } catch (error) {
+        // Connection failed - log and rethrow
+        Logger.error('Failed to wait for WhatsApp connection', {
+          error: error.message,
+          sessionId: this.config.sessionId
+        });
+        throw error;
+      }
     }
 
     throw new Error('No connection in progress. Call initialize() first.');

@@ -94,6 +94,32 @@ class TwilioService {
       // Support both SID/AuthToken and accountSid/authToken field names
       const sidField = twilioConnector.config.SID || twilioConnector.config.accountSid;
       const tokenField = twilioConnector.config.AuthToken || twilioConnector.config.authToken;
+      
+      // Determine which field name is used to get correct IV/AuthTag field names
+      const sidFieldName = twilioConnector.config.SID ? 'SID' : 'accountSid';
+      const tokenFieldName = twilioConnector.config.AuthToken ? 'AuthToken' : 'authToken';
+      
+      // Get IV and AuthTag from document-level metadata (new structure), config.metadata, or config root (backward compatibility)
+      const documentMetadata = twilioConnector.metadata || {};
+      const configMetadata = twilioConnector.config.metadata || {};
+      
+      // Try document metadata first, then config.metadata, then config root for backward compatibility
+      const sidIV = documentMetadata[`${sidFieldName}IV`] || 
+                    configMetadata[`${sidFieldName}IV`] || 
+                    twilioConnector.config[`${sidFieldName}IV`] || 
+                    twilioConnector.config.sidIV;
+      const sidAuthTag = documentMetadata[`${sidFieldName}AuthTag`] || 
+                         configMetadata[`${sidFieldName}AuthTag`] || 
+                         twilioConnector.config[`${sidFieldName}AuthTag`] || 
+                         twilioConnector.config.sidAuthTag;
+      const tokenIV = documentMetadata[`${tokenFieldName}IV`] || 
+                      configMetadata[`${tokenFieldName}IV`] || 
+                      twilioConnector.config[`${tokenFieldName}IV`] || 
+                      twilioConnector.config.tokenIV;
+      const tokenAuthTag = documentMetadata[`${tokenFieldName}AuthTag`] || 
+                           configMetadata[`${tokenFieldName}AuthTag`] || 
+                           twilioConnector.config[`${tokenFieldName}AuthTag`] || 
+                           twilioConnector.config.tokenAuthTag;
 
       Logger.debug('Twilio config retrieved from database', {
         subaccountId,
@@ -101,8 +127,12 @@ class TwilioService {
         hasAccountSid: !!twilioConnector.config.accountSid,
         hasAuthToken: !!twilioConnector.config.AuthToken,
         hasauthToken: !!twilioConnector.config.authToken,
-        hasSidIV: !!twilioConnector.config.sidIV,
-        hasTokenIV: !!twilioConnector.config.tokenIV,
+        sidFieldName,
+        tokenFieldName,
+        hasSidIV: !!sidIV,
+        hasSidAuthTag: !!sidAuthTag,
+        hasTokenIV: !!tokenIV,
+        hasTokenAuthTag: !!tokenAuthTag,
         sidFieldLength: sidField ? sidField.length : 0,
         sidFieldPrefix: sidField ? sidField.substring(0, 4) : 'null'
       });
@@ -115,50 +145,77 @@ class TwilioService {
       let accountSid = sidField;
       let authToken = tokenField;
 
-      // Check if credentials are encrypted
-      if (twilioConnector.config.sidIV && twilioConnector.config.sidAuthTag) {
+      // Check if credentials are encrypted (try both naming conventions)
+      if (sidIV && sidAuthTag) {
         try {
           accountSid = this.decryptCredential(
             sidField,
-            twilioConnector.config.sidIV,
-            twilioConnector.config.sidAuthTag
+            sidIV,
+            sidAuthTag
           );
           
           Logger.debug('Twilio SID decrypted successfully', { subaccountId });
         } catch (error) {
           Logger.error('Failed to decrypt Twilio SID', {
             subaccountId,
-            error: error.message
+            error: error.message,
+            errorCode: error.code,
+            sidFieldName,
+            hasSidIV: !!sidIV,
+            hasSidAuthTag: !!sidAuthTag,
+            sidIVLength: sidIV ? sidIV.length : 0,
+            sidAuthTagLength: sidAuthTag ? sidAuthTag.length : 0
           });
-          throw new Error('Failed to decrypt Twilio SID');
+          
+          // Provide more helpful error message
+          if (error.message.includes('Unsupported state') || error.message.includes('bad decrypt')) {
+            throw new Error('Failed to decrypt Twilio SID. The encryption key may have changed or the data is corrupted. Please reconfigure your Twilio credentials.');
+          }
+          throw new Error('Failed to decrypt Twilio SID: ' + error.message);
         }
       }
 
-      if (twilioConnector.config.tokenIV && twilioConnector.config.tokenAuthTag) {
+      if (tokenIV && tokenAuthTag) {
         try {
           authToken = this.decryptCredential(
             tokenField,
-            twilioConnector.config.tokenIV,
-            twilioConnector.config.tokenAuthTag
+            tokenIV,
+            tokenAuthTag
           );
 
           Logger.debug('Twilio AuthToken decrypted successfully', { subaccountId });
         } catch (error) {
           Logger.error('Failed to decrypt Twilio AuthToken', {
             subaccountId,
-            error: error.message
+            error: error.message,
+            errorCode: error.code,
+            tokenFieldName
           });
-          throw new Error('Failed to decrypt Twilio AuthToken');
+          
+          // Provide more helpful error message
+          if (error.message.includes('Unsupported state') || error.message.includes('bad decrypt')) {
+            throw new Error('Failed to decrypt Twilio AuthToken. The encryption key may have changed or the data is corrupted. Please reconfigure your Twilio credentials.');
+          }
+          throw new Error('Failed to decrypt Twilio AuthToken: ' + error.message);
         }
       }
 
       // Validate the decrypted accountSid format
       if (!accountSid || !accountSid.startsWith('AC')) {
+        const documentMetadata = twilioConnector.metadata || {};
+        const configMetadata = twilioConnector.config.metadata || {};
+        const hasEncryptionInDocumentMetadata = !!(documentMetadata.sidIV && documentMetadata.sidAuthTag);
+        const hasEncryptionInConfigMetadata = !!(configMetadata.sidIV && configMetadata.sidAuthTag);
+        const hasEncryptionInConfig = !!(twilioConnector.config.sidIV && twilioConnector.config.sidAuthTag);
+        
         Logger.error('Invalid Twilio accountSid after decryption', {
           subaccountId,
           accountSidLength: accountSid ? accountSid.length : 0,
           accountSidPrefix: accountSid ? accountSid.substring(0, 2) : 'null',
-          hasEncryption: !!(twilioConnector.config.sidIV && twilioConnector.config.sidAuthTag)
+          hasEncryption: hasEncryptionInDocumentMetadata || hasEncryptionInConfigMetadata || hasEncryptionInConfig,
+          encryptionLocation: hasEncryptionInDocumentMetadata ? 'document.metadata' : 
+                             (hasEncryptionInConfigMetadata ? 'config.metadata' : 
+                             (hasEncryptionInConfig ? 'config' : 'none'))
         });
         throw new Error('Invalid Twilio accountSid format. AccountSid must start with "AC"');
       }
@@ -1819,6 +1876,7 @@ class TwilioService {
 
   /**
    * Delete phone number from Retell, Twilio, and MongoDB
+   * First unlinks the phone number from all agents, then deletes it
    * @param {string} subaccountId - Subaccount ID
    * @param {string} phoneNumber - Phone number to delete
    * @param {string} userId - User ID making the request
@@ -1832,10 +1890,26 @@ class TwilioService {
       });
 
       const results = {
+        unlink: { success: false },
         retell: { success: false },
         twilio: { success: false },
         mongodb: { success: false }
       };
+
+      // Get MongoDB connection first to check current state
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+
+      // Get current phone number document to check agent assignments
+      const phoneNumberDoc = await phoneNumbersCollection.findOne({
+        subaccountId,
+        phone_number: phoneNumber
+      });
+
+      if (!phoneNumberDoc) {
+        throw new Error('Phone number not found in database');
+      }
 
       // Get Retell API key
       let retellApiKey;
@@ -1843,6 +1917,78 @@ class TwilioService {
         retellApiKey = await this.getRetellApiKey(subaccountId);
       } catch (error) {
         Logger.warn('Could not get Retell API key', { error: error.message });
+      }
+
+      // Step 1: Unlink phone number from all agents before deletion
+      const needsUnlink = phoneNumberDoc.inbound_agent_id || phoneNumberDoc.outbound_agent_id;
+      
+      if (needsUnlink && retellApiKey) {
+        try {
+          Logger.info('Unlinking phone number from agents before deletion', {
+            phoneNumber,
+            inbound_agent_id: phoneNumberDoc.inbound_agent_id,
+            outbound_agent_id: phoneNumberDoc.outbound_agent_id
+          });
+
+          const unlinkPayload = {};
+          if (phoneNumberDoc.inbound_agent_id) {
+            unlinkPayload.inbound_agent_id = null;
+          }
+          if (phoneNumberDoc.outbound_agent_id) {
+            unlinkPayload.outbound_agent_id = null;
+          }
+
+          await axios.patch(
+            `https://api.retellai.com/update-phone-number/${encodeURIComponent(phoneNumber)}`,
+            unlinkPayload,
+            {
+              headers: {
+                'Authorization': `Bearer ${retellApiKey}`,
+                'Content-Type': 'application/json'
+              },
+              timeout: 30000
+            }
+          );
+
+          // Update MongoDB to reflect unlink
+          await phoneNumbersCollection.updateOne(
+            { subaccountId, phone_number: phoneNumber },
+            {
+              $set: {
+                inbound_agent_id: null,
+                outbound_agent_id: null,
+                inbound_agent_version: null,
+                outbound_agent_version: null,
+                updatedAt: new Date()
+              }
+            }
+          );
+
+          results.unlink.success = true;
+          Logger.info('Phone number unlinked from agents successfully', {
+            phoneNumber,
+            unlinkedAgents: {
+              inbound: phoneNumberDoc.inbound_agent_id,
+              outbound: phoneNumberDoc.outbound_agent_id
+            }
+          });
+        } catch (unlinkError) {
+          Logger.error('Failed to unlink phone number from agents', {
+            phoneNumber,
+            error: unlinkError.message,
+            response: unlinkError.response?.data
+          });
+          results.unlink.error = unlinkError.message;
+          // Continue with deletion even if unlink fails
+        }
+      } else if (needsUnlink && !retellApiKey) {
+        results.unlink.skipped = true;
+        results.unlink.reason = 'Retell API key not configured';
+        Logger.warn('Cannot unlink phone number - Retell API key not available', { phoneNumber });
+      } else {
+        results.unlink.skipped = true;
+        results.unlink.reason = 'No agent assignments found';
+        Logger.info('Phone number has no agent assignments, skipping unlink', { phoneNumber });
       }
 
       // Delete from Retell
@@ -1901,12 +2047,8 @@ class TwilioService {
         results.twilio.error = twilioError.message;
       }
 
-      // Delete from MongoDB
+      // Delete from MongoDB (reuse connection from earlier)
       try {
-        const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
-        const { connection } = connectionInfo;
-        const phoneNumbersCollection = connection.db.collection('phonenumbers');
-
         const deleteResult = await phoneNumbersCollection.deleteOne({
           subaccountId,
           phone_number: phoneNumber
@@ -1929,7 +2071,11 @@ class TwilioService {
       return {
         phoneNumber,
         results,
-        success: results.retell.success || results.twilio.success || results.mongodb.success
+        success: results.unlink.success !== false && (results.retell.success || results.twilio.success || results.mongodb.success),
+        unlinkedFromAgents: results.unlink.success ? {
+          inbound_agent_id: phoneNumberDoc.inbound_agent_id,
+          outbound_agent_id: phoneNumberDoc.outbound_agent_id
+        } : null
       };
     } catch (error) {
       Logger.error('Failed to delete phone number', {

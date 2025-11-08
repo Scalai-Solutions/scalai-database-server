@@ -4690,14 +4690,9 @@ After appointment is booked:
                 }
               }
             },
-            duration: {
-              $cond: {
-                if: { $and: [
-                  { $ne: [{ $type: '$end_timestamp' }, 'missing'] },
-                  { $ne: [{ $type: '$start_timestamp' }, 'missing'] }
-                ]},
-                then: { $divide: [{ $subtract: ['$end_timestamp', '$start_timestamp'] }, 1000] },
-                else: 0
+            messageCount: {
+              $size: {
+                $ifNull: ['$messages', []]
               }
             },
             isUnresponsive: {
@@ -4711,7 +4706,7 @@ After appointment is booked:
                         {
                           $size: {
                             $filter: {
-                              input: { $ifNull: ['$message_with_tool_calls', []] },
+                              input: { $ifNull: ['$messages', []] },
                               as: 'msg',
                               cond: { $eq: ['$$msg.role', 'agent'] }
                             }
@@ -4739,9 +4734,9 @@ After appointment is booked:
             totalChats: { $sum: 1 },
             unresponsiveChats: { $sum: '$isUnresponsive' },
             totalCost: { $sum: { $divide: [{ $ifNull: ['$chat_cost.combined_cost', 0] }, 100] } },
-            totalDuration: { $sum: '$duration' },
-            chatsWithDuration: {
-              $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] }
+            totalMessages: { $sum: '$messageCount' },
+            chatsWithMessages: {
+              $sum: { $cond: [{ $gt: ['$messageCount', 0] }, 1, 0] }
             }
           }
         }
@@ -4803,16 +4798,16 @@ After appointment is booked:
         totalChats: 0,
         unresponsiveChats: 0,
         totalCost: 0,
-        totalDuration: 0,
-        chatsWithDuration: 0
+        totalMessages: 0,
+        chatsWithMessages: 0
       };
 
       const previousChatsData = chatsAggregation.find(s => s._id === 'previous') || {
         totalChats: 0,
         unresponsiveChats: 0,
         totalCost: 0,
-        totalDuration: 0,
-        chatsWithDuration: 0
+        totalMessages: 0,
+        chatsWithMessages: 0
       };
 
       const currentMeetingsData = meetingsAggregation.find(m => m._id === 'current') || { totalMeetings: 0 };
@@ -4829,8 +4824,8 @@ After appointment is booked:
         costPerChat: currentChatsData.totalChats > 0 
           ? currentChatsData.totalCost / currentChatsData.totalChats 
           : 0,
-        avgChatDuration: currentChatsData.chatsWithDuration > 0 
-          ? currentChatsData.totalDuration / currentChatsData.chatsWithDuration 
+        avgMessageCount: currentChatsData.chatsWithMessages > 0 
+          ? currentChatsData.totalMessages / currentChatsData.chatsWithMessages 
           : 0,
         periodStart: currentPeriodStart,
         periodEnd: currentPeriodEnd
@@ -4846,8 +4841,8 @@ After appointment is booked:
         costPerChat: previousChatsData.totalChats > 0 
           ? previousChatsData.totalCost / previousChatsData.totalChats 
           : 0,
-        avgChatDuration: previousChatsData.chatsWithDuration > 0 
-          ? previousChatsData.totalDuration / previousChatsData.chatsWithDuration 
+        avgMessageCount: previousChatsData.chatsWithMessages > 0 
+          ? previousChatsData.totalMessages / previousChatsData.chatsWithMessages 
           : 0,
         periodStart: previousPeriodStart,
         periodEnd: previousPeriodEnd
@@ -4876,7 +4871,7 @@ After appointment is booked:
           unresponsiveChats: currentStats.unresponsiveChats,
           cumulativeSuccessRate: Math.round(currentStats.cumulativeSuccessRate * 100) / 100,
           costPerChat: Math.round(currentStats.costPerChat * 100) / 100,
-          avgChatDuration: Math.round(currentStats.avgChatDuration * 100) / 100,
+          avgMessageCount: Math.round(currentStats.avgMessageCount * 100) / 100,
           periodStart: currentStats.periodStart.toISOString(),
           periodEnd: currentStats.periodEnd.toISOString()
         },
@@ -4886,7 +4881,7 @@ After appointment is booked:
           unresponsiveChats: previousStats.unresponsiveChats,
           cumulativeSuccessRate: Math.round(previousStats.cumulativeSuccessRate * 100) / 100,
           costPerChat: Math.round(previousStats.costPerChat * 100) / 100,
-          avgChatDuration: Math.round(previousStats.avgChatDuration * 100) / 100,
+          avgMessageCount: Math.round(previousStats.avgMessageCount * 100) / 100,
           periodStart: previousStats.periodStart.toISOString(),
           periodEnd: previousStats.periodEnd.toISOString()
         },
@@ -4921,10 +4916,10 @@ After appointment is booked:
               calculatePercentageChange(currentStats.costPerChat, previousStats.costPerChat) * 100
             ) / 100
           },
-          avgChatDuration: {
-            change: Math.round((currentStats.avgChatDuration - previousStats.avgChatDuration) * 100) / 100,
+          avgMessageCount: {
+            change: Math.round((currentStats.avgMessageCount - previousStats.avgMessageCount) * 100) / 100,
             percentageChange: Math.round(
-              calculatePercentageChange(currentStats.avgChatDuration, previousStats.avgChatDuration) * 100
+              calculatePercentageChange(currentStats.avgMessageCount, previousStats.avgMessageCount) * 100
             ) / 100
           }
         }
@@ -6404,6 +6399,359 @@ After appointment is booked:
 
     } catch (error) {
       const errorInfo = await DatabaseController.handleError(error, req, operationId, 'updateAgentLLM', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Get email template for a chat agent
+  static async getChatAgentEmailTemplate(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const userId = req.user?.id || 'service';
+      const isServiceAuth = !!req.service;
+
+      Logger.info('Fetching chat agent email template', {
+        operationId,
+        subaccountId,
+        userId: isServiceAuth ? req.service.serviceName : userId,
+        agentId,
+        authType: isServiceAuth ? 'service' : 'user'
+      });
+
+      // Get database connection (use 'system' for service-to-service calls)
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, isServiceAuth ? 'system' : userId);
+      const { connection } = connectionInfo;
+
+      // Get chatagents collection
+      const chatAgentsCollection = connection.db.collection('chatagents');
+
+      // Find the chat agent
+      const agentDocument = await chatAgentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      }, {
+        projection: {
+          agentId: 1,
+          name: 1,
+          emailTemplate: 1
+        }
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'CHAT_AGENT_NOT_FOUND'
+        });
+      }
+
+      const duration = Date.now() - startTime;
+
+      res.json({
+        success: true,
+        message: 'Email template retrieved successfully',
+        data: {
+          agentId: agentDocument.agentId,
+          agentName: agentDocument.name,
+          emailTemplate: agentDocument.emailTemplate || null
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'getChatAgentEmailTemplate', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Update email template for a chat agent
+  static async updateChatAgentEmailTemplate(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const { emailTemplate } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('Updating chat agent email template', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        hasEmailTemplate: !!emailTemplate
+      });
+
+      // Validate emailTemplate
+      if (emailTemplate !== null && typeof emailTemplate !== 'string') {
+        return res.status(400).json({
+          success: false,
+          message: 'Email template must be a string or null',
+          code: 'INVALID_EMAIL_TEMPLATE'
+        });
+      }
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get chatagents collection
+      const chatAgentsCollection = connection.db.collection('chatagents');
+
+      // Check if chat agent exists
+      const agentDocument = await chatAgentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'CHAT_AGENT_NOT_FOUND'
+        });
+      }
+
+      // Update email template
+      const updateResult = await chatAgentsCollection.updateOne(
+        { agentId: agentId, subaccountId: subaccountId },
+        { 
+          $set: { 
+            emailTemplate: emailTemplate,
+            updatedAt: new Date(),
+            updatedBy: userId
+          } 
+        }
+      );
+
+      // Invalidate cache
+      try {
+        await redisService.invalidateAgentDetails(subaccountId, agentId);
+        Logger.debug('Chat agent details cache invalidated', {
+          operationId,
+          agentId
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to invalidate chat agent details cache', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.AGENT_UPDATED,
+        category: ACTIVITY_CATEGORIES.AGENT,
+        userId,
+        description: `Email template updated for chat agent "${agentDocument.name}"`,
+        metadata: {
+          agentId,
+          agentName: agentDocument.name,
+          hasEmailTemplate: !!emailTemplate
+        },
+        resourceId: agentId,
+        resourceName: agentDocument.name,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Chat agent email template updated successfully', {
+        operationId,
+        agentId,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Email template updated successfully',
+        data: {
+          agentId: agentDocument.agentId,
+          agentName: agentDocument.name,
+          emailTemplate: emailTemplate,
+          updated: updateResult.modifiedCount > 0
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'updateChatAgentEmailTemplate', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  // Update LLM model for a chat agent
+  static async updateChatAgentLLM(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId, agentId } = req.params;
+      const { model } = req.body;
+      const userId = req.user.id;
+
+      Logger.info('Updating chat agent LLM model', {
+        operationId,
+        subaccountId,
+        userId,
+        agentId,
+        model
+      });
+
+      // Fetch retell account data (with caching)
+      const retellAccountData = await retellService.getRetellAccount(subaccountId);
+      
+      if (!retellAccountData.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Retell account is not active',
+          code: 'RETELL_ACCOUNT_INACTIVE'
+        });
+      }
+
+      // Create Retell instance with decrypted API key
+      const retell = new Retell(retellAccountData.apiKey, retellAccountData);
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+
+      // Get chatagents collection
+      const chatAgentsCollection = connection.db.collection('chatagents');
+
+      // Find the chat agent
+      const agentDocument = await chatAgentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
+
+      if (!agentDocument) {
+        return res.status(404).json({
+          success: false,
+          message: 'Chat agent not found',
+          code: 'CHAT_AGENT_NOT_FOUND'
+        });
+      }
+
+      // Get the LLM ID from the chat agent
+      const llmId = agentDocument.llmId;
+      
+      if (!llmId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Chat agent does not have an associated LLM',
+          code: 'NO_LLM_FOUND'
+        });
+      }
+
+      // Update LLM on Retell platform
+      const updateData = {
+        model: model
+      };
+
+      await retell.updateLLM(llmId, updateData);
+
+      Logger.info('LLM updated on Retell platform', {
+        operationId,
+        llmId,
+        model
+      });
+
+      // Update LLM in llms collection
+      const llmsCollection = connection.db.collection('llms');
+      await llmsCollection.updateOne(
+        { llmId: llmId, subaccountId: subaccountId },
+        { 
+          $set: { 
+            model: model,
+            updatedAt: new Date(),
+            updatedBy: userId
+          } 
+        }
+      );
+
+      // Also update chat agent document to keep model reference
+      await chatAgentsCollection.updateOne(
+        { agentId: agentId, subaccountId: subaccountId },
+        { 
+          $set: { 
+            'model': model,
+            updatedAt: new Date(),
+            updatedBy: userId
+          } 
+        }
+      );
+
+      // Invalidate cache (both agent details and stats)
+      try {
+        await redisService.invalidateAgentDetails(subaccountId, agentId);
+        await redisService.invalidateAgentStats(subaccountId, agentId);
+        Logger.debug('Chat agent cache invalidated (details and stats)', {
+          operationId,
+          agentId
+        });
+      } catch (cacheError) {
+        Logger.warn('Failed to invalidate chat agent cache', {
+          operationId,
+          error: cacheError.message
+        });
+      }
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.AGENT_UPDATED,
+        category: ACTIVITY_CATEGORIES.AGENT,
+        userId,
+        description: `LLM model updated for chat agent "${agentDocument.name}" to ${model}`,
+        metadata: {
+          agentId,
+          agentName: agentDocument.name,
+          llmId: llmId,
+          model: model
+        },
+        resourceId: agentId,
+        resourceName: agentDocument.name,
+        operationId
+      });
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Chat agent LLM updated successfully', {
+        operationId,
+        agentId,
+        llmId,
+        model,
+        duration: `${duration}ms`
+      });
+
+      res.json({
+        success: true,
+        message: 'Chat agent LLM model updated successfully',
+        data: {
+          agentId: agentDocument.agentId,
+          agentName: agentDocument.name,
+          llmId: llmId,
+          model: model
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await DatabaseController.handleError(error, req, operationId, 'updateChatAgentLLM', startTime);
       return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }

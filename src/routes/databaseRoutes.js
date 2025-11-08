@@ -35,6 +35,16 @@ router.get('/:subaccountId/agents/:agentId/email-template',
   DatabaseController.getAgentEmailTemplate
 );
 
+// GET /api/database/:subaccountId/chat-agents/:agentId/email-template - Get chat agent email template (supports service auth)
+router.get('/:subaccountId/chat-agents/:agentId/email-template',
+  authenticateTokenOrService,
+  validateSubaccountId,
+  validateAgentId,
+  userLimiter,
+  subaccountLimiter(200, 60000),
+  DatabaseController.getChatAgentEmailTemplate
+);
+
 // Apply JWT authentication and rate limiting to all other routes
 router.use(authenticateToken);
 router.use(userLimiter);
@@ -129,6 +139,15 @@ router.patch('/:subaccountId/agents/:agentId/email-template',
   DatabaseController.updateAgentEmailTemplate
 );
 
+// PATCH /api/database/:subaccountId/chat-agents/:agentId/email-template - Update chat agent email template (user auth only)
+router.patch('/:subaccountId/chat-agents/:agentId/email-template',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.updateChatAgentEmailTemplate
+);
+
 // ========== VOICE MANAGEMENT ROUTES ==========
 
 // GET /api/database/:subaccountId/voices - Get list of available voices (ElevenLabs only)
@@ -157,6 +176,16 @@ router.patch('/:subaccountId/agents/:agentId/llm',
   requireResourcePermission(),
   subaccountLimiter(100, 60000),
   DatabaseController.updateAgentLLM
+);
+
+// PATCH /api/database/:subaccountId/chat-agents/:agentId/llm - Update chat agent LLM model
+router.patch('/:subaccountId/chat-agents/:agentId/llm',
+  validateSubaccountId,
+  validateAgentId,
+  validateUpdateAgentLLMBody,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  DatabaseController.updateChatAgentLLM
 );
 
 // ========== CHAT AGENTS ROUTES ==========

@@ -69,4 +69,13 @@ router.get('/:subaccountId/:chatId/transcript',
   ChatController.getChatTranscript
 );
 
+// DELETE /api/chats/:subaccountId/:chatId - Delete a chat
+router.delete('/:subaccountId/:chatId',
+  validateSubaccountId,
+  validateChatId,
+  requireResourcePermission(),
+  subaccountLimiter(50, 60000),
+  ChatController.deleteChat
+);
+
 module.exports = router; 

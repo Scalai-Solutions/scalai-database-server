@@ -49,6 +49,41 @@ router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
 
+// Middleware to extract agentId from path and set scope to local
+const extractAgentIdFromPath = (req, res, next) => {
+  if (req.params.agentId) {
+    req.body.agentId = req.params.agentId;
+    req.body.scope = 'local'; // Force local scope when agentId is in path
+  }
+  next();
+};
+
+// POST /api/knowledge-base/:subaccountId/chat-agents/:agentId/resources - Add a resource for a chat agent
+router.post('/:subaccountId/chat-agents/:agentId/resources',
+  upload.single('file'), // Handle file upload
+  validateSubaccountId,
+  validateAgentId,
+  extractAgentIdFromPath,
+  validateAddResourceBody,
+  validateFileUpload,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  KnowledgeBaseController.addResource
+);
+
+// POST /api/knowledge-base/:subaccountId/agents/:agentId/resources - Add a resource for a regular agent
+router.post('/:subaccountId/agents/:agentId/resources',
+  upload.single('file'), // Handle file upload
+  validateSubaccountId,
+  validateAgentId,
+  extractAgentIdFromPath,
+  validateAddResourceBody,
+  validateFileUpload,
+  requireResourcePermission(),
+  subaccountLimiter(100, 60000),
+  KnowledgeBaseController.addResource
+);
+
 // POST /api/knowledge-base/:subaccountId/resources - Add a resource (text, URL, or file)
 router.post('/:subaccountId/resources',
   upload.single('file'), // Handle file upload
@@ -83,6 +118,15 @@ router.get('/:subaccountId/agents/:agentId/local',
   requireResourcePermission(),
   subaccountLimiter(200, 60000),
   KnowledgeBaseController.getLocalKB
+);
+
+// GET /api/knowledge-base/:subaccountId/chat-agents/:agentId/local - Get local knowledge base for a chat agent
+router.get('/:subaccountId/chat-agents/:agentId/local',
+  validateSubaccountId,
+  validateAgentId,
+  requireResourcePermission(),
+  subaccountLimiter(200, 60000),
+  KnowledgeBaseController.getChatAgentLocalKB
 );
 
 // DELETE /api/knowledge-base/:subaccountId/resources/:resourceId - Delete a resource

@@ -140,7 +140,41 @@ class WhatsAppService {
 
       // Initialize connector (this will trigger QR generation or auto-connect if session exists)
       // Pass forceNew=true to ensure we don't reuse existing client
-      await connector.initialize(true);
+      // Wrap in timeout to prevent hanging indefinitely
+      try {
+        await Promise.race([
+          connector.initialize(true),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('WhatsApp initialization timeout after 60 seconds')), 60000)
+          )
+        ]);
+      } catch (initError) {
+        Logger.error('WhatsApp initialization failed or timed out', {
+          subaccountId,
+          agentId,
+          error: initError.message,
+          errorType: initError.constructor.name
+        });
+        
+        // If initialization fails, we can still try to generate QR if client exists
+        // But if it's a timeout, we should fail fast
+        if (initError.message.includes('timeout')) {
+          throw new Error('WhatsApp initialization timed out. Please try again.');
+        }
+        // For other errors, log but continue - might still be able to generate QR
+        Logger.warn('Continuing despite initialization error', {
+          error: initError.message
+        });
+      }
+
+      // Check if client was created successfully
+      if (!connector.client) {
+        Logger.error('WhatsApp client was not created after initialization', {
+          subaccountId,
+          agentId
+        });
+        throw new Error('Failed to initialize WhatsApp client. Please try again.');
+      }
 
       // Wait a moment for client to potentially auto-connect (if session exists)
       // Then check actual connection status
@@ -184,7 +218,25 @@ class WhatsAppService {
       }
 
       // Generate QR code (if not already connected)
-      const qrResult = await connector.generateQR();
+      // Wrap in timeout to prevent hanging
+      let qrResult;
+      try {
+        qrResult = await Promise.race([
+          connector.generateQR(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('QR code generation timeout after 45 seconds')), 45000)
+          )
+        ]);
+      } catch (qrError) {
+        Logger.error('QR code generation failed or timed out', {
+          subaccountId,
+          agentId,
+          error: qrError.message
+        });
+        
+        // Return a more helpful error message
+        throw new Error('QR code generation timed out. The WhatsApp client may be taking longer than expected. Please try again in a moment.');
+      }
 
       // Check if QR generation was successful
       if (!qrResult || !qrResult.success) {

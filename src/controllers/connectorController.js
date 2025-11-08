@@ -195,6 +195,7 @@ class ConnectorController {
       });
       
       // Generic encryption for all connectors that require it
+      let encryptionMetadata = {};
       if (validatedConfig && Object.keys(validatedConfig).length > 0 && encryptionService.requiresEncryption(connectorResult.data.connector)) {
         Logger.info('Encrypting connector credentials before storage', { 
           subaccountId, 
@@ -206,11 +207,20 @@ class ConnectorController {
         const fieldsToEncrypt = encryptionService.getEncryptableFields(connectorResult.data.connector);
         
         // Encrypt the config using generic encryption service
-        finalConfig = encryptionService.encryptConfig(
+        const encryptionResult = encryptionService.encryptConfig(
           validatedConfig, 
           connectorResult.data.type,
           fieldsToEncrypt
         );
+        
+        // For Twilio connectors, encryptionResult is { config, metadata }
+        // For other connectors, encryptionResult is the config object
+        if (connectorResult.data.type === 'twilio' && encryptionResult.config && encryptionResult.metadata) {
+          finalConfig = encryptionResult.config;
+          encryptionMetadata = encryptionResult.metadata;
+        } else {
+          finalConfig = encryptionResult;
+        }
         
         Logger.info('Connector credentials encrypted successfully', { 
           subaccountId,
@@ -229,7 +239,7 @@ class ConnectorController {
         isActive: isActive !== undefined ? isActive : true,
         createdAt: new Date(),
         updatedAt: new Date(),
-        metadata: {}
+        metadata: encryptionMetadata // For Twilio, this contains encryption metadata
       };
 
       const result = await connection.db.collection('connectorsubaccount').insertOne(connectorSubaccount);
@@ -421,6 +431,7 @@ class ConnectorController {
       
       // Encrypt connector credentials if connector requires encryption
       let finalConfig = validatedConfig;
+      let encryptionMetadata = null; // Initialize for Twilio connectors
       
       Logger.debug('Checking if encryption needed for connector update', { 
         connectorType: existingConnector.connectorType, 
@@ -462,19 +473,39 @@ class ConnectorController {
         
         if (fieldsToEncryptNow.length > 0) {
           // Encrypt the updated fields
-          const encryptedFields = encryptionService.encryptConfig(
+          const encryptionResult = encryptionService.encryptConfig(
             validatedConfig, 
             existingConnector.connectorType,
             fieldsToEncryptNow
           );
           
-          // Merge encrypted fields into the base config
-          Object.keys(encryptedFields).forEach(key => {
-            baseConfig[key] = encryptedFields[key];
-          });
+          // For Twilio connectors, encryptionResult is { config, metadata }
+          // For other connectors, encryptionResult is the config object
+          if (existingConnector.connectorType === 'twilio' && encryptionResult.config && encryptionResult.metadata) {
+            // Merge encrypted fields into the base config
+            Object.keys(encryptionResult.config).forEach(key => {
+              baseConfig[key] = encryptionResult.config[key];
+            });
+            
+            // Remove old IV/AuthTag fields from config root if they exist
+            fieldsToEncryptNow.forEach(field => {
+              delete baseConfig[`${field}IV`];
+              delete baseConfig[`${field}AuthTag`];
+            });
+            
+            // Store encryption metadata separately (will be merged with document metadata below)
+            finalConfig = baseConfig;
+            encryptionMetadata = encryptionResult.metadata;
+          } else {
+            // Merge encrypted fields into the base config
+            Object.keys(encryptionResult).forEach(key => {
+              baseConfig[key] = encryptionResult[key];
+            });
+            finalConfig = baseConfig;
+          }
+        } else {
+          finalConfig = baseConfig;
         }
-        
-        finalConfig = baseConfig;
         
         Logger.info('Connector credentials encrypted successfully', { 
           subaccountId,
@@ -491,6 +522,16 @@ class ConnectorController {
         config: finalConfig,
         updatedAt: new Date()
       };
+
+      // For Twilio connectors, merge encryption metadata into document-level metadata
+      if (existingConnector.connectorType === 'twilio' && encryptionMetadata) {
+        // Merge encryption metadata with existing document metadata
+        const existingMetadata = existingConnector.metadata || {};
+        updateData.metadata = {
+          ...existingMetadata,
+          ...encryptionMetadata
+        };
+      }
 
       if (isActive !== undefined) {
         updateData.isActive = isActive;
