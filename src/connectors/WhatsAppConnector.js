@@ -110,11 +110,34 @@ class WhatsAppConnector extends BaseChatConnector {
       };
 
       // Use Chrome binary from Heroku buildpack if available
-      if (process.env.CHROME_BIN) {
-        puppeteerConfig.executablePath = process.env.CHROME_BIN;
-        Logger.info('Using Chrome binary from Heroku buildpack', {
-          chromeBin: process.env.CHROME_BIN,
-          sessionId: this.config.sessionId
+      // Try CHROME_BIN first (set by puppeteer-heroku-buildpack), then fallback to chromium-browser
+      let chromePath = process.env.CHROME_BIN;
+      if (!chromePath) {
+        // Fallback to chromium-browser installed via apt buildpack
+        const fs = require('fs');
+        const possiblePaths = [
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+          '/app/.apt/usr/bin/chromium-browser'
+        ];
+        for (const path of possiblePaths) {
+          try {
+            if (fs.existsSync(path)) {
+              chromePath = path;
+              break;
+            }
+          } catch (e) {
+            // Continue checking other paths
+          }
+        }
+      }
+      
+      if (chromePath) {
+        puppeteerConfig.executablePath = chromePath;
+        Logger.info('Using Chrome binary for Heroku', {
+          chromeBin: chromePath,
+          sessionId: this.config.sessionId,
+          source: process.env.CHROME_BIN ? 'puppeteer-buildpack' : 'apt-buildpack'
         });
       }
 

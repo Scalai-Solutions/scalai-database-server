@@ -1,5 +1,7 @@
 # Required system dependencies for Puppeteer/Chromium on Heroku
 # These libraries are needed for Chromium to run on Heroku's Linux environment
+chromium-browser
+chromium-chromedriver
 libatk1.0-0
 libatk-bridge2.0-0
 libcups2
