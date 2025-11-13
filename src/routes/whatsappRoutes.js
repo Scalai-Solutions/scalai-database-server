@@ -29,6 +29,7 @@ router.post('/:subaccountId/chat-agents/:agentId/whatsapp/connect',
   WhatsAppController.connect
 );
 
+
 // GET /api/database/:subaccountId/chat-agents/:agentId/whatsapp/status - Get connection status
 router.get('/:subaccountId/chat-agents/:agentId/whatsapp/status',
   validateSubaccountId,

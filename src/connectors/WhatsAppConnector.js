@@ -93,23 +93,37 @@ class WhatsAppConnector extends BaseChatConnector {
       }
 
       // Create client with session persistence
+      // Configure Puppeteer for Heroku (uses CHROME_BIN from buildpacks)
+      const puppeteerConfig = {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process'
+        ]
+      };
+
+      // Use Chrome binary from Heroku buildpack if available
+      if (process.env.CHROME_BIN) {
+        puppeteerConfig.executablePath = process.env.CHROME_BIN;
+        Logger.info('Using Chrome binary from Heroku buildpack', {
+          chromeBin: process.env.CHROME_BIN,
+          sessionId: this.config.sessionId
+        });
+      }
+
       this.client = new Client({
         authStrategy: new LocalAuth({
           clientId: this.config.sessionId,
           dataPath: path.join(__dirname, '../../.wwebjs_auth')
         }),
-        puppeteer: {
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-          ]
-        }
+        puppeteer: puppeteerConfig
       });
 
       // Setup event listeners FIRST, before initializing
