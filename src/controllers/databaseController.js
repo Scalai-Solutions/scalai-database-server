@@ -3578,6 +3578,115 @@ After appointment is booked:
         agentName: agentResponse.agent_name
       });
 
+      // Step 2.5: Update agent with webhook URL (now that we have agentId) and tool URLs
+      if (deployedWebhookUrl) {
+        const webhookUrlWithAgent = `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/retell`;
+        
+        Logger.info('Updating chat agent with webhook URL and tool URLs', {
+          operationId,
+          subaccountId,
+          agentId,
+          webhookUrl: webhookUrlWithAgent
+        });
+
+        // Update LLM with tool URLs that include subaccountId and agentId
+        const updatedLlmConfig = {
+          general_tools: [
+            {
+              type: "end_call",
+              name: "end_call",
+              description: "End the call with user."
+            }
+          ],
+          states: [
+            {
+              name: "general_state",
+              description: "General state with additional information",
+              state_prompt: llmConfig.states[0].state_prompt,
+              edges: llmConfig.states[0].edges
+            },
+            {
+              name: "check_availability_state",
+              description: "State for checking appointment availability",
+              state_prompt: llmConfig.states[1].state_prompt,
+              tools: [
+                {
+                  type: "custom",
+                  name: "check_availability",
+                  url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/check-availability`,
+                  speak_during_execution: false,
+                  speak_after_execution: true,
+                  description: "Check if a specific time slot is available for booking an appointment",
+                  parameters: llmConfig.states[1].tools[0].parameters,
+                  execution_message_description: "Checking availability for the appointment",
+                  timeout_ms: 120000
+                }
+              ],
+              edges: llmConfig.states[1].edges
+            },
+            {
+              name: "nearest_slots_state",
+              description: "State for finding nearest available slots",
+              state_prompt: llmConfig.states[2].state_prompt,
+              tools: [
+                {
+                  type: "custom",
+                  name: "nearest_available_slots",
+                  url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/nearest-available-slots`,
+                  speak_during_execution: false,
+                  speak_after_execution: true,
+                  description: "Find the nearest available appointment slots",
+                  parameters: llmConfig.states[2].tools[0].parameters,
+                  execution_message_description: "Finding nearest available slots",
+                  timeout_ms: 120000
+                }
+              ],
+              edges: llmConfig.states[2].edges
+            },
+            {
+              name: "book_appointment_state",
+              description: "State for booking an appointment",
+              state_prompt: llmConfig.states[3].state_prompt,
+              tools: [
+                {
+                  type: "custom",
+                  name: "book_appointment",
+                  url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/book-appointment`,
+                  speak_during_execution: false,
+                  speak_after_execution: true,
+                  description: "Book an appointment at a specific time slot",
+                  parameters: llmConfig.states[3].tools[0].parameters,
+                  execution_message_description: "Booking the appointment",
+                  timeout_ms: 120000
+                }
+              ],
+              edges: llmConfig.states[3].edges
+            }
+          ]
+        };
+
+        // Update LLM with new tool URLs
+        await retell.updateLLM(llmId, updatedLlmConfig);
+
+        // Update agent with webhook URL
+        await retell.updateAgent(agentId, {
+          webhook_url: webhookUrlWithAgent
+        });
+
+        Logger.info('Chat agent and LLM updated with webhook URL and tool URLs', {
+          operationId,
+          subaccountId,
+          agentId,
+          webhookUrl: webhookUrlWithAgent
+        });
+      } else {
+        Logger.warn('DEPLOYED_WEBHOOK_SERVER_URL not configured, skipping webhook URL update for chat agent', {
+          operationId,
+          subaccountId,
+          agentId
+        });
+      }
+
       // Step 3: Store LLM data in database
       const llmsCollection = connection.db.collection('llms');
       const llmDocument = {
