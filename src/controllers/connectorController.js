@@ -1400,6 +1400,49 @@ class ConnectorController {
         trunkSid: result.trunk.sid
       });
 
+      // Automatically configure default GB regulatory bundle
+      const config = require('../../config/config');
+      const defaultBundleSid = process.env.TWILIO_DEFAULT_BUNDLE_SID || 'BU3d5be36ba71da67b804b80c766250783';
+      
+      if (defaultBundleSid) {
+        try {
+          Logger.info('Auto-configuring Twilio regulatory bundle', {
+            subaccountId,
+            bundleSid: defaultBundleSid
+          });
+          
+          // Get database connection
+          const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+          const { connection } = connectionInfo;
+          
+          // Update the bundleSid in retellIntegration metadata
+          await connection.db.collection('connectorsubaccount').updateOne(
+            {
+              subaccountId,
+              connectorType: 'twilio'
+            },
+            {
+              $set: {
+                'metadata.retellIntegration.bundleSid': defaultBundleSid,
+                updatedAt: new Date()
+              }
+            }
+          );
+          
+          Logger.info('Twilio bundle configured automatically', {
+            subaccountId,
+            bundleSid: defaultBundleSid
+          });
+        } catch (bundleError) {
+          // Don't fail the setup if bundle configuration fails
+          Logger.warn('Failed to auto-configure Twilio bundle (non-critical)', {
+            subaccountId,
+            bundleSid: defaultBundleSid,
+            error: bundleError.message
+          });
+        }
+      }
+
       // Log activity
       await ActivityService.logActivity({
         subaccountId,
@@ -1488,13 +1531,15 @@ class ConnectorController {
         smsEnabled, 
         voiceEnabled, 
         mmsEnabled, 
-        limit 
+        limit,
+        type // 'local', 'mobile', 'tollFree', or 'all'
       } = req.query;
 
       Logger.info('Searching available phone numbers', {
         subaccountId,
         countryCode,
         areaCode,
+        type,
         requestId: req.requestId
       });
 
@@ -1502,10 +1547,19 @@ class ConnectorController {
       if (countryCode) options.countryCode = countryCode;
       if (areaCode) options.areaCode = areaCode;
       if (contains) options.contains = contains;
-      if (smsEnabled !== undefined) options.smsEnabled = smsEnabled === 'true';
-      if (voiceEnabled !== undefined) options.voiceEnabled = voiceEnabled === 'true';
-      if (mmsEnabled !== undefined) options.mmsEnabled = mmsEnabled === 'true';
+      // Only set capability filters if explicitly provided in query params
+      // This allows the service to search without capability restrictions (matching Twilio UI behavior)
+      if (smsEnabled !== undefined) {
+        options.smsEnabled = smsEnabled === 'true' || smsEnabled === true;
+      }
+      if (voiceEnabled !== undefined) {
+        options.voiceEnabled = voiceEnabled === 'true' || voiceEnabled === true;
+      }
+      if (mmsEnabled !== undefined) {
+        options.mmsEnabled = mmsEnabled === 'true' || mmsEnabled === true;
+      }
       if (limit) options.limit = parseInt(limit, 10);
+      if (type) options.type = type; // 'local', 'mobile', 'tollFree', or 'all'
 
       const result = await twilioService.searchAvailablePhoneNumbers(subaccountId, options);
 
@@ -1526,6 +1580,186 @@ class ConnectorController {
         success: false,
         message: error.message || 'Failed to search available phone numbers',
         code: 'TWILIO_SEARCH_ERROR'
+      });
+    }
+  }
+
+  /**
+   * Update Twilio emergency address ID in connector metadata
+   */
+  async updateTwilioEmergencyAddress(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { emergencyAddressId } = req.body;
+
+      if (!emergencyAddressId) {
+        return res.status(400).json({
+          success: false,
+          message: 'emergencyAddressId is required',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      Logger.info('Updating Twilio emergency address ID', {
+        subaccountId,
+        emergencyAddressId,
+        requestId: req.requestId
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+      const { connection } = connectionInfo;
+
+      // Find the Twilio connector
+      const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
+        subaccountId,
+        connectorType: 'twilio'
+      });
+
+      if (!twilioConnector) {
+        return res.status(404).json({
+          success: false,
+          message: 'Twilio connector not found for this subaccount',
+          code: 'CONNECTOR_NOT_FOUND'
+        });
+      }
+
+      // Update the emergencyAddressId in retellIntegration metadata
+      const updateResult = await connection.db.collection('connectorsubaccount').updateOne(
+        {
+          subaccountId,
+          connectorType: 'twilio'
+        },
+        {
+          $set: {
+            'metadata.retellIntegration.emergencyAddressId': emergencyAddressId,
+            updatedAt: new Date()
+          }
+        }
+      );
+
+      if (updateResult.matchedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Twilio connector not found',
+          code: 'CONNECTOR_NOT_FOUND'
+        });
+      }
+
+      Logger.info('Twilio emergency address ID updated successfully', {
+        subaccountId,
+        emergencyAddressId
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Emergency address ID updated successfully',
+        data: {
+          emergencyAddressId
+        }
+      });
+
+    } catch (error) {
+      Logger.error('Failed to update Twilio emergency address ID', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId: req.params.subaccountId
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to update emergency address ID',
+        code: 'TWILIO_EMERGENCY_ADDRESS_UPDATE_ERROR'
+      });
+    }
+  }
+
+  /**
+   * Update Twilio bundle SID in connector metadata
+   */
+  async updateTwilioBundle(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { bundleSid } = req.body;
+
+      if (!bundleSid) {
+        return res.status(400).json({
+          success: false,
+          message: 'bundleSid is required',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      Logger.info('Updating Twilio bundle SID', {
+        subaccountId,
+        bundleSid,
+        requestId: req.requestId
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+      const { connection } = connectionInfo;
+
+      // Find the Twilio connector
+      const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
+        subaccountId,
+        connectorType: 'twilio'
+      });
+
+      if (!twilioConnector) {
+        return res.status(404).json({
+          success: false,
+          message: 'Twilio connector not found for this subaccount',
+          code: 'CONNECTOR_NOT_FOUND'
+        });
+      }
+
+      // Update the bundleSid in retellIntegration metadata
+      const updateResult = await connection.db.collection('connectorsubaccount').updateOne(
+        {
+          subaccountId,
+          connectorType: 'twilio'
+        },
+        {
+          $set: {
+            'metadata.retellIntegration.bundleSid': bundleSid,
+            updatedAt: new Date()
+          }
+        }
+      );
+
+      if (updateResult.matchedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Twilio connector not found',
+          code: 'CONNECTOR_NOT_FOUND'
+        });
+      }
+
+      Logger.info('Twilio bundle SID updated successfully', {
+        subaccountId,
+        bundleSid
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Bundle SID updated successfully',
+        data: {
+          bundleSid
+        }
+      });
+
+    } catch (error) {
+      Logger.error('Failed to update Twilio bundle SID', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId: req.params.subaccountId
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to update bundle SID',
+        code: 'TWILIO_BUNDLE_UPDATE_ERROR'
       });
     }
   }

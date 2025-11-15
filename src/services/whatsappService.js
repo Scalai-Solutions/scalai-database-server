@@ -109,18 +109,139 @@ class WhatsAppService {
         userId
       });
 
-      // Always get a fresh connector - clean up any existing session first
-      const connector = await this.getConnector(subaccountId, agentId, userId, true);
+      // FIRST: Check if there's already an active connector that's connected
+      const sessionId = `${subaccountId}_${agentId}`;
+      if (this.activeConnectors.has(sessionId)) {
+        const existingConnector = this.activeConnectors.get(sessionId);
+        const existingStatus = await existingConnector.getConnectionStatus();
+        
+        // If already connected, return connection details without recreating connector
+        if (existingStatus.data && existingStatus.data.isConnected) {
+          Logger.info('WhatsApp already connected, returning existing connection details', {
+            subaccountId,
+            agentId,
+            phoneNumber: existingStatus.data.phoneNumber
+          });
+          
+          // Ensure message handler is still registered (in case it was lost)
+          // IMPORTANT: Capture connector reference in closure
+          const messageHandler = async (message) => {
+            Logger.info('Message handler called (existing connector)', {
+              subaccountId,
+              agentId,
+              from: message.from,
+              hasBody: !!message.body,
+              connectorInMap: this.activeConnectors.has(`${subaccountId}_${agentId}`)
+            });
+            await this.handleIncomingMessage(subaccountId, agentId, message, existingConnector);
+          };
+          
+          await existingConnector.onMessage(messageHandler);
+          
+          Logger.info('Message handler re-registered for existing connector', {
+            subaccountId,
+            agentId
+          });
+          
+          return {
+            success: true,
+            connector: 'whatsapp',
+            operation: 'generateQR',
+            data: {
+              alreadyConnected: true,
+              message: 'WhatsApp is already connected',
+              phoneNumber: existingStatus.data.phoneNumber,
+              platform: existingStatus.data.platform,
+              pushname: existingStatus.data.pushname,
+              isConnected: true,
+              isActive: true
+            },
+            timestamp: new Date()
+          };
+        }
+        
+        // If connector exists but is disconnected, clean it up
+        Logger.info('Existing connector found but disconnected, cleaning up', {
+          subaccountId,
+          agentId
+        });
+        try {
+          await existingConnector.disconnect();
+        } catch (error) {
+          Logger.warn('Error disconnecting existing connector', {
+            error: error.message
+          });
+        }
+        this.activeConnectors.delete(sessionId);
+      }
 
-      // IMPORTANT: Setup callbacks BEFORE initializing to ensure they're registered
-      // before any events fire (especially if client auto-connects from cached session)
+      // Get connector (reuse existing if available, don't force new)
+      const connector = await this.getConnector(subaccountId, agentId, userId, false);
+
+      // IMPORTANT: Always setup callbacks/handlers, even if connector already exists
+      // This ensures handlers are registered even if connector was reused
       connector.onReady(async () => {
         Logger.info('WhatsApp ready callback triggered', {
           subaccountId,
           agentId,
           userId
         });
-        await this.updateConnectionStatus(subaccountId, agentId, userId, 'connected');
+        
+        // CRITICAL: Re-register message handler after connection is ready
+        // This ensures messages are processed even if handler was lost during reconnection
+        // IMPORTANT: Capture connector reference in closure
+        const messageHandler = async (message) => {
+          Logger.info('Message handler called (ready callback)', {
+            subaccountId,
+            agentId,
+            from: message.from,
+            hasBody: !!message.body,
+            connectorInMap: this.activeConnectors.has(`${subaccountId}_${agentId}`)
+          });
+          await this.handleIncomingMessage(subaccountId, agentId, message, connector);
+        };
+        
+        await connector.onMessage(messageHandler);
+        
+        Logger.info('Message handler re-registered after connection ready', {
+          subaccountId,
+          agentId,
+          handlerRegistered: true
+        });
+        
+        // Get connection details including phone number, platform, pushname
+        try {
+          const status = await connector.getConnectionStatus();
+          const connectionData = status.data || {};
+          
+          // Update connection status
+          await this.updateConnectionStatus(subaccountId, agentId, userId, 'connected');
+          
+          // Store connection info with phone number, platform, and pushname
+          await this.storeConnectionInfo(subaccountId, agentId, userId, {
+            status: 'connected',
+            phoneNumber: connectionData.phoneNumber,
+            platform: connectionData.platform,
+            pushname: connectionData.pushname,
+            qrGenerated: false,
+            connectedAt: new Date()
+          });
+          
+          Logger.info('WhatsApp connection details stored', {
+            subaccountId,
+            agentId,
+            phoneNumber: connectionData.phoneNumber,
+            platform: connectionData.platform
+          });
+        } catch (error) {
+          Logger.error('Error storing connection details in ready callback', {
+            error: error.message,
+            subaccountId,
+            agentId
+          });
+          // Still update status even if storing details fails
+          await this.updateConnectionStatus(subaccountId, agentId, userId, 'connected');
+        }
       });
 
       connector.onDisconnect(async (reason) => {
@@ -133,54 +254,88 @@ class WhatsAppService {
         await this.updateConnectionStatus(subaccountId, agentId, userId, 'disconnected', { reason });
       });
 
-      // Setup message handler
-      connector.onMessage(async (message) => {
-        await this.handleIncomingMessage(subaccountId, agentId, message);
-      });
-
-      // Initialize connector (this will trigger QR generation or auto-connect if session exists)
-      // Pass forceNew=true to ensure we don't reuse existing client
-      // Wrap in timeout to prevent hanging indefinitely
-      try {
-        await Promise.race([
-          connector.initialize(true),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('WhatsApp initialization timeout after 60 seconds')), 60000)
-          )
-        ]);
-      } catch (initError) {
-        Logger.error('WhatsApp initialization failed or timed out', {
+      // CRITICAL: Always setup message handler - this ensures messages are processed
+      // even if connector was reused or reinitialized
+      // Register handler BEFORE initialization to ensure it's ready when messages arrive
+      // IMPORTANT: Capture connector reference in closure so it's available even if removed from activeConnectors
+      const messageHandler = async (message) => {
+        Logger.info('Message handler called', {
           subaccountId,
           agentId,
-          error: initError.message,
-          errorType: initError.constructor.name
+          from: message.from,
+          hasBody: !!message.body,
+          connectorInMap: this.activeConnectors.has(`${subaccountId}_${agentId}`)
         });
-        
-        // If initialization fails, we can still try to generate QR if client exists
-        // But if it's a timeout, we should fail fast
-        if (initError.message.includes('timeout')) {
-          throw new Error('WhatsApp initialization timed out. Please try again.');
-        }
-        // For other errors, log but continue - might still be able to generate QR
-        Logger.warn('Continuing despite initialization error', {
-          error: initError.message
-        });
-      }
-
-      // Check if client was created successfully
-      if (!connector.client) {
-        Logger.error('WhatsApp client was not created after initialization', {
+        await this.handleIncomingMessage(subaccountId, agentId, message, connector);
+      };
+      
+      // Register and verify handler
+      const handlerResult = await connector.onMessage(messageHandler);
+      if (!handlerResult || !handlerResult.success) {
+        Logger.error('Failed to register message handler', {
           subaccountId,
-          agentId
+          agentId,
+          result: handlerResult
         });
-        throw new Error('Failed to initialize WhatsApp client. Please try again.');
+        throw new Error('Failed to register WhatsApp message handler');
+      } else {
+        Logger.info('Message handler registered and verified', {
+          subaccountId,
+          agentId,
+          handlerCount: handlerResult.data?.handlerCount || 0,
+          sessionId: `${subaccountId}_${agentId}`
+        });
       }
 
-      // Wait a moment for client to potentially auto-connect (if session exists)
-      // Then check actual connection status
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Check if connector is already initialized and connected
+      const existingStatus = await connector.getConnectionStatus();
+      const isAlreadyInitialized = connector.client && existingStatus.data && existingStatus.data.isConnected;
+      
+      if (!isAlreadyInitialized) {
+        // Only initialize if not already connected
+        // Initialize connector (this will trigger QR generation or auto-connect if session exists)
+        // Wrap in timeout to prevent hanging indefinitely
+        try {
+          await Promise.race([
+            connector.initialize(false), // Don't force new - reuse existing client if available
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('WhatsApp initialization timeout after 60 seconds')), 60000)
+            )
+          ]);
+        } catch (initError) {
+          Logger.error('WhatsApp initialization failed or timed out', {
+            subaccountId,
+            agentId,
+            error: initError.message,
+            errorType: initError.constructor.name
+          });
+          
+          // If initialization fails, we can still try to generate QR if client exists
+          // But if it's a timeout, we should fail fast
+          if (initError.message.includes('timeout')) {
+            throw new Error('WhatsApp initialization timed out. Please try again.');
+          }
+          // For other errors, log but continue - might still be able to generate QR
+          Logger.warn('Continuing despite initialization error', {
+            error: initError.message
+          });
+        }
 
-      // Check if already connected (auto-connected from cached session)
+        // Check if client was created successfully
+        if (!connector.client) {
+          Logger.error('WhatsApp client was not created after initialization', {
+            subaccountId,
+            agentId
+          });
+          throw new Error('Failed to initialize WhatsApp client. Please try again.');
+        }
+
+        // Wait a moment for client to potentially auto-connect (if session exists)
+        // Then check actual connection status
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Check connection status (either after initialization or if already initialized)
       const currentStatus = await connector.getConnectionStatus();
       const isAlreadyConnected = currentStatus.data && currentStatus.data.isConnected;
 
@@ -279,21 +434,30 @@ class WhatsAppService {
         const connector = this.activeConnectors.get(sessionId);
         const status = await connector.getConnectionStatus();
         
-        // If connector shows as disconnected, remove it from active connectors
-        if (status.data && status.data.isConnected === false) {
-          Logger.info('Removing disconnected connector from active connectors', {
-            sessionId,
-            subaccountId,
-            agentId
-          });
-          this.activeConnectors.delete(sessionId);
+        // If connector shows as connected, return full details
+        if (status.data && status.data.isConnected === true) {
+          return status;
         }
         
+        // If connector shows as disconnected, verify before removing
+        // Don't remove if messages are still being received (connector might be in transition)
+        if (status.data && status.data.isConnected === false) {
+          Logger.warn('Connector shows as disconnected, but keeping in activeConnectors in case messages still arrive', {
+            sessionId,
+            subaccountId,
+            agentId,
+            note: 'Will be cleaned up on explicit disconnect or when connection is re-established'
+          });
+          // Don't remove - let it stay in case messages are still being received
+          // It will be cleaned up properly on explicit disconnect
+        }
+        
+        // If connector exists but not connected yet, return its status (might have QR)
         return status;
       }
 
       // If no active connector, check database for connection record
-      // Note: After disconnect, the database record is deleted, so this should return not_initialized
+      // This handles the case where connector was connected but server restarted
       try {
         const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
         const { connection } = connectionInfo;
@@ -306,23 +470,26 @@ class WhatsAppService {
 
         if (connectionRecord && connectionRecord.status === 'connected') {
           // Connection record exists and shows as connected
-          // But connector is not in activeConnectors, so it's a stale record
-          Logger.warn('Found stale connection record in database', {
+          // Return connection details from database
+          Logger.info('Found connection record in database', {
             subaccountId,
             agentId,
-            status: connectionRecord.status
+            phoneNumber: connectionRecord.phoneNumber
           });
           
-          // Return disconnected status since connector is not active
           return {
             success: true,
             data: {
-              isConnected: false,
-              isActive: false,
+              isConnected: true,
+              isActive: false, // Connector not in memory, but connection exists
               hasQR: false,
               qrCodeDataUrl: null,
-              status: 'disconnected',
-              note: 'Connection record exists but connector is not active'
+              phoneNumber: connectionRecord.phoneNumber,
+              platform: connectionRecord.platform,
+              pushname: connectionRecord.pushname,
+              status: 'connected',
+              connectedAt: connectionRecord.connectedAt,
+              note: 'Connection exists but connector not in memory (may need to reconnect)'
             }
           };
         }
@@ -667,57 +834,212 @@ class WhatsAppService {
 
   /**
    * Handle incoming WhatsApp message and forward to chat agent
+   * @param {string} subaccountId - Subaccount ID
+   * @param {string} agentId - Agent ID
+   * @param {Object} message - WhatsApp message object
+   * @param {Object} connector - WhatsApp connector instance (optional, will be looked up if not provided)
    */
-  async handleIncomingMessage(subaccountId, agentId, message) {
+  async handleIncomingMessage(subaccountId, agentId, message, connector = null) {
     try {
       Logger.info('Handling incoming WhatsApp message', {
         subaccountId,
         agentId,
         from: message.from,
-        messageId: message.id._serialized
+        messageId: message.id._serialized,
+        hasBody: !!message.body,
+        bodyLength: message.body ? message.body.length : 0,
+        hasMedia: message.hasMedia,
+        type: message.type
       });
+
+      // Skip if message has no body and no media (system messages, etc.)
+      if (!message.body && !message.hasMedia) {
+        Logger.debug('Skipping message with no body or media', {
+          subaccountId,
+          agentId,
+          from: message.from,
+          type: message.type
+        });
+        return;
+      }
 
       // Get sender's phone number (without @c.us suffix)
       const phoneNumber = message.from.replace('@c.us', '');
+
+      // Extract message content - use body if available, otherwise describe media
+      let messageContent = message.body || '';
+      if (message.hasMedia && !messageContent) {
+        // For media messages without caption, describe the media type
+        messageContent = `[${message.type || 'media'} message]`;
+      }
+
+      // Skip empty messages
+      if (!messageContent || messageContent.trim().length === 0) {
+        Logger.debug('Skipping empty message', {
+          subaccountId,
+          agentId,
+          from: message.from
+        });
+        return;
+      }
+
+      Logger.debug('Forwarding message to chat agent', {
+        subaccountId,
+        agentId,
+        phoneNumber,
+        messageLength: messageContent.length
+      });
 
       // Forward message to chat agent and get response
       const agentResponse = await this.forwardToChageAgent(
         subaccountId, 
         agentId, 
         phoneNumber,
-        message.body
+        messageContent
       );
 
+      Logger.debug('Received response from chat agent', {
+        subaccountId,
+        agentId,
+        hasReply: !!(agentResponse && agentResponse.reply),
+        replyLength: agentResponse && agentResponse.reply ? agentResponse.reply.length : 0
+      });
+
       // Send agent's response back via WhatsApp
-      if (agentResponse && agentResponse.reply) {
-        await this.sendMessage(subaccountId, agentId, message.from, agentResponse.reply);
+      // Use provided connector or look it up from activeConnectors
+      const sessionId = `${subaccountId}_${agentId}`;
+      
+      // If connector not provided, try to get it from activeConnectors
+      if (!connector) {
+        connector = this.activeConnectors.get(sessionId);
+      }
+      
+      if (!connector) {
+        Logger.error('Connector not found when trying to send reply', {
+          subaccountId,
+          agentId,
+          sessionId,
+          activeConnectorKeys: Array.from(this.activeConnectors.keys()),
+          connectorProvided: !!connector
+        });
+        throw new Error('WhatsApp connector not found');
+      }
+      
+      Logger.debug('Using connector for sending reply', {
+        subaccountId,
+        agentId,
+        connectorExists: !!connector,
+        connectorConnected: connector.isConnected,
+        connectorInMap: this.activeConnectors.has(sessionId)
+      });
+      
+      if (!connector.isConnected) {
+        Logger.error('Connector exists but isConnected is false when trying to send reply', {
+          subaccountId,
+          agentId,
+          sessionId,
+          isConnected: connector.isConnected,
+          isActive: connector.isActive
+        });
+        // Try to get actual connection status
+        try {
+          const status = await connector.getConnectionStatus();
+          Logger.info('Actual connector status', {
+            subaccountId,
+            agentId,
+            status: status.data
+          });
+          // If actually connected, update the flag
+          if (status.data && status.data.isConnected) {
+            connector.isConnected = true;
+            connector.isActive = true;
+            Logger.info('Updated connector connection status from actual status check', {
+              subaccountId,
+              agentId
+            });
+          } else {
+            throw new Error('WhatsApp connector is not actually connected');
+          }
+        } catch (statusError) {
+          Logger.error('Failed to check connector status', {
+            error: statusError.message,
+            subaccountId,
+            agentId
+          });
+          throw new Error('WhatsApp connector is not connected');
+        }
+      }
+      
+      if (agentResponse && agentResponse.reply && agentResponse.reply.trim().length > 0) {
+        Logger.debug('Sending reply via connector', {
+          subaccountId,
+          agentId,
+          to: message.from,
+          replyLength: agentResponse.reply.length,
+          connectorConnected: connector.isConnected
+        });
+        
+        // Use connector directly instead of sendMessage method
+        const sendResult = await connector.sendMessage(message.from, agentResponse.reply);
         
         Logger.info('Chat agent response sent via WhatsApp', {
           subaccountId,
           agentId,
-          to: message.from
+          to: message.from,
+          replyLength: agentResponse.reply.length,
+          messageId: sendResult.data?.messageId
+        });
+      } else {
+        Logger.warn('No reply from chat agent or reply is empty', {
+          subaccountId,
+          agentId,
+          agentResponse: agentResponse ? 'exists' : 'null',
+          hasReply: !!(agentResponse && agentResponse.reply)
         });
       }
       
     } catch (error) {
       Logger.error('Error handling incoming message', {
         error: error.message,
+        stack: error.stack,
         subaccountId,
-        agentId
+        agentId,
+        from: message.from
       });
       
-      // Send error message to user
+      // Send error message to user using connector directly
       const sessionId = `${subaccountId}_${agentId}`;
       if (this.activeConnectors.has(sessionId)) {
         const connector = this.activeConnectors.get(sessionId);
         try {
-          await connector.sendMessage(
-            message.from, 
-            "Sorry, I'm having trouble processing your message right now. Please try again later."
-          );
+          // Check if connector is actually connected before sending error
+          const status = await connector.getConnectionStatus();
+          if (status.data && status.data.isConnected) {
+            await connector.sendMessage(
+              message.from, 
+              "Sorry, I'm having trouble processing your message right now. Please try again later."
+            );
+          } else {
+            Logger.warn('Cannot send error message - connector not connected', {
+              subaccountId,
+              agentId,
+              status: status.data
+            });
+          }
         } catch (sendError) {
-          Logger.error('Failed to send error message', { error: sendError.message });
+          Logger.error('Failed to send error message', { 
+            error: sendError.message,
+            subaccountId,
+            agentId
+          });
         }
+      } else {
+        Logger.error('Cannot send error message - connector not in activeConnectors', {
+          subaccountId,
+          agentId,
+          sessionId,
+          activeConnectorKeys: Array.from(this.activeConnectors.keys())
+        });
       }
     }
   }
@@ -744,7 +1066,23 @@ class WhatsAppService {
       const retell = new Retell(retellAccountData.apiKey, retellAccountData);
       
       // Send message to chat agent and get completion
+      Logger.debug('Sending message to Retell chat agent', {
+        subaccountId,
+        agentId,
+        chatId,
+        messageLength: messageContent.length
+      });
+      
       const response = await retell.createChatCompletion(chatId, messageContent);
+      
+      Logger.debug('Received response from Retell', {
+        subaccountId,
+        agentId,
+        chatId,
+        hasMessages: !!(response && response.messages),
+        messageCount: response && response.messages ? response.messages.length : 0,
+        responseKeys: response ? Object.keys(response) : []
+      });
       
       // Update chat in database
       await this.updateChatSession(subaccountId, chatId, response);
@@ -757,7 +1095,9 @@ class WhatsAppService {
         agentId,
         chatId,
         phoneNumber,
-        hasReply: !!agentReply
+        hasReply: !!agentReply,
+        replyLength: agentReply ? agentReply.length : 0,
+        replyPreview: agentReply ? agentReply.substring(0, 100) : null
       });
       
       return {
@@ -895,28 +1235,62 @@ class WhatsAppService {
    */
   extractAgentReply(response) {
     try {
-      // Get the last message from the agent (not from user)
-      const messages = response.messages || [];
-      
-      if (messages.length === 0) {
+      if (!response) {
+        Logger.warn('No response provided to extractAgentReply');
         return null;
       }
       
-      // Find the last assistant message
+      // Get the last message from the agent (not from user)
+      const messages = response.messages || [];
+      
+      Logger.debug('Extracting agent reply', {
+        messageCount: messages.length,
+        messageRoles: messages.map(m => m.role)
+      });
+      
+      if (messages.length === 0) {
+        Logger.warn('No messages in response', {
+          responseKeys: Object.keys(response)
+        });
+        return null;
+      }
+      
+      // Find the last agent message (Retell uses 'agent' role, not 'assistant')
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
-        if (msg.role === 'assistant' && msg.content) {
+        // Check for both 'agent' (Retell format) and 'assistant' (OpenAI format) for compatibility
+        if ((msg.role === 'agent' || msg.role === 'assistant') && msg.content) {
+          Logger.debug('Found agent message', {
+            index: i,
+            role: msg.role,
+            contentLength: msg.content.length,
+            contentPreview: msg.content.substring(0, 100)
+          });
           return msg.content;
         }
       }
       
-      // Fallback: return the last message content
+      // Fallback: return the last message content if it exists
       const lastMessage = messages[messages.length - 1];
-      return lastMessage.content || null;
+      if (lastMessage && lastMessage.content) {
+        Logger.debug('Using last message as fallback', {
+          role: lastMessage.role,
+          contentLength: lastMessage.content.length
+        });
+        return lastMessage.content;
+      }
+      
+      Logger.warn('No valid reply found in response', {
+        messageCount: messages.length,
+        lastMessage: lastMessage ? { role: lastMessage.role, hasContent: !!lastMessage.content } : null
+      });
+      
+      return null;
       
     } catch (error) {
       Logger.error('Error extracting agent reply', {
-        error: error.message
+        error: error.message,
+        stack: error.stack
       });
       return null;
     }

@@ -171,6 +171,11 @@ class WhatsAppController {
       });
 
       const result = await whatsappService.disconnect(subaccountId, agentId, userId);
+      const agentsCollection = connection.db.collection('chatagents');
+      const agentDocument = await agentsCollection.findOne({ 
+        agentId: agentId,
+        subaccountId: subaccountId 
+      });
 
       // Log activity
       await ActivityService.logActivity({
@@ -178,7 +183,7 @@ class WhatsAppController {
         activityType: ACTIVITY_TYPES.WHATSAPP_DISCONNECTED,
         category: ACTIVITY_CATEGORIES.CHAT,
         userId,
-        description: `WhatsApp disconnected for agent ${agentId}. All related data cleaned up.`,
+        description: `WhatsApp disconnected for agent ${agentDocument.name || agentId}. All related data cleaned up.`,
         metadata: {
           agentId,
           cleanupCompleted: true

@@ -481,10 +481,11 @@ class InstagramService {
         return null;
       }
       
-      // Find the last assistant message
+      // Find the last agent message (Retell uses 'agent' role, not 'assistant')
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
-        if (msg.role === 'assistant' && msg.content) {
+        // Check for both 'agent' (Retell format) and 'assistant' (OpenAI format) for compatibility
+        if ((msg.role === 'agent' || msg.role === 'assistant') && msg.content) {
           return msg.content;
         }
       }

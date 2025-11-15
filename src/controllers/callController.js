@@ -255,22 +255,22 @@ class CallController {
       }
 
       // Log activity
-      await ActivityService.logActivity({
-        subaccountId,
-        activityType: ACTIVITY_TYPES.CALL_UPDATED,
-        category: ACTIVITY_CATEGORIES.CALL,
-        userId: 'webhook-service',
-        description: `Call ${callId} updated via webhook`,
-        metadata: {
-          callId,
-          updatedFields: Object.keys(updateData || {}),
-          serviceName,
-          upserted: result.upsertedCount > 0
-        },
-        resourceId: callId,
-        resourceName: `Call ${callId}`,
-        operationId
-      });
+      // await ActivityService.logActivity({
+      //   subaccountId,
+      //   activityType: ACTIVITY_TYPES.CALL_UPDATED,
+      //   category: ACTIVITY_CATEGORIES.CALL,
+      //   userId: 'webhook-service',
+      //   description: `Call ${callId} updated via webhook`,
+      //   metadata: {
+      //     callId,
+      //     updatedFields: Object.keys(updateData || {}),
+      //     serviceName,
+      //     upserted: result.upsertedCount > 0
+      //   },
+      //   resourceId: callId,
+      //   resourceName: `Call ${callId}`,
+      //   operationId
+      // });
 
       res.json({
         success: true,

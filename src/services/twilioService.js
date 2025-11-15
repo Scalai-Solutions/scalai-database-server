@@ -10,6 +10,290 @@ const encryptionService = require('./encryptionService');
 class TwilioService {
   constructor() {
     this.clients = new Map(); // Cache for Twilio client instances
+    
+    // Map phone country codes to ISO country codes
+    // This allows users to pass phone country codes (e.g., 44) instead of ISO codes (e.g., GB)
+    this.phoneCountryCodeToISO = {
+      '1': 'US',      // North America (US/Canada)
+      '7': 'RU',      // Russia/Kazakhstan
+      '20': 'EG',     // Egypt
+      '27': 'ZA',     // South Africa
+      '30': 'GR',     // Greece
+      '31': 'NL',     // Netherlands
+      '32': 'BE',     // Belgium
+      '33': 'FR',     // France
+      '34': 'ES',     // Spain
+      '36': 'HU',     // Hungary
+      '39': 'IT',     // Italy
+      '40': 'RO',     // Romania
+      '41': 'CH',     // Switzerland
+      '43': 'AT',     // Austria
+      '44': 'GB',     // United Kingdom
+      '45': 'DK',     // Denmark
+      '46': 'SE',     // Sweden
+      '47': 'NO',     // Norway
+      '48': 'PL',     // Poland
+      '49': 'DE',     // Germany
+      '51': 'PE',     // Peru
+      '52': 'MX',     // Mexico
+      '53': 'CU',     // Cuba
+      '54': 'AR',     // Argentina
+      '55': 'BR',     // Brazil
+      '56': 'CL',     // Chile
+      '57': 'CO',     // Colombia
+      '58': 'VE',     // Venezuela
+      '60': 'MY',     // Malaysia
+      '61': 'AU',     // Australia
+      '62': 'ID',     // Indonesia
+      '63': 'PH',     // Philippines
+      '64': 'NZ',     // New Zealand
+      '65': 'SG',     // Singapore
+      '66': 'TH',     // Thailand
+      '81': 'JP',     // Japan
+      '82': 'KR',     // South Korea
+      '84': 'VN',     // Vietnam
+      '86': 'CN',     // China
+      '90': 'TR',     // Turkey
+      '91': 'IN',     // India
+      '92': 'PK',     // Pakistan
+      '93': 'AF',     // Afghanistan
+      '94': 'LK',     // Sri Lanka
+      '95': 'MM',     // Myanmar
+      '98': 'IR',     // Iran
+      '212': 'MA',    // Morocco
+      '213': 'DZ',    // Algeria
+      '216': 'TN',    // Tunisia
+      '218': 'LY',    // Libya
+      '220': 'GM',    // Gambia
+      '221': 'SN',    // Senegal
+      '222': 'MR',    // Mauritania
+      '223': 'ML',    // Mali
+      '224': 'GN',    // Guinea
+      '225': 'CI',    // Côte d'Ivoire
+      '226': 'BF',    // Burkina Faso
+      '227': 'NE',    // Niger
+      '228': 'TG',    // Togo
+      '229': 'BJ',    // Benin
+      '230': 'MU',    // Mauritius
+      '231': 'LR',    // Liberia
+      '232': 'SL',    // Sierra Leone
+      '233': 'GH',    // Ghana
+      '234': 'NG',    // Nigeria
+      '235': 'TD',    // Chad
+      '236': 'CF',    // Central African Republic
+      '237': 'CM',    // Cameroon
+      '238': 'CV',    // Cape Verde
+      '239': 'ST',    // São Tomé and Príncipe
+      '240': 'GQ',    // Equatorial Guinea
+      '241': 'GA',    // Gabon
+      '242': 'CG',    // Republic of the Congo
+      '243': 'CD',    // Democratic Republic of the Congo
+      '244': 'AO',    // Angola
+      '245': 'GW',    // Guinea-Bissau
+      '246': 'IO',    // British Indian Ocean Territory
+      '248': 'SC',    // Seychelles
+      '249': 'SD',    // Sudan
+      '250': 'RW',    // Rwanda
+      '251': 'ET',    // Ethiopia
+      '252': 'SO',    // Somalia
+      '253': 'DJ',    // Djibouti
+      '254': 'KE',    // Kenya
+      '255': 'TZ',    // Tanzania
+      '256': 'UG',    // Uganda
+      '257': 'BI',    // Burundi
+      '258': 'MZ',    // Mozambique
+      '260': 'ZM',    // Zambia
+      '261': 'MG',    // Madagascar
+      '262': 'RE',    // Réunion / Mayotte
+      '263': 'ZW',    // Zimbabwe
+      '264': 'NA',    // Namibia
+      '265': 'MW',    // Malawi
+      '266': 'LS',    // Lesotho
+      '267': 'BW',    // Botswana
+      '268': 'SZ',    // Eswatini
+      '269': 'KM',    // Comoros
+      '290': 'SH',    // Saint Helena
+      '291': 'ER',    // Eritrea
+      '297': 'AW',    // Aruba
+      '298': 'FO',    // Faroe Islands
+      '299': 'GL',    // Greenland
+      '350': 'GI',    // Gibraltar
+      '351': 'PT',    // Portugal
+      '352': 'LU',    // Luxembourg
+      '353': 'IE',    // Ireland
+      '354': 'IS',    // Iceland
+      '355': 'AL',    // Albania
+      '356': 'MT',    // Malta
+      '357': 'CY',    // Cyprus
+      '358': 'FI',    // Finland
+      '359': 'BG',    // Bulgaria
+      '370': 'LT',    // Lithuania
+      '371': 'LV',    // Latvia
+      '372': 'EE',    // Estonia
+      '373': 'MD',    // Moldova
+      '374': 'AM',    // Armenia
+      '375': 'BY',    // Belarus
+      '376': 'AD',    // Andorra
+      '377': 'MC',    // Monaco
+      '378': 'SM',    // San Marino
+      '380': 'UA',    // Ukraine
+      '381': 'RS',    // Serbia
+      '382': 'ME',    // Montenegro
+      '383': 'XK',    // Kosovo
+      '385': 'HR',    // Croatia
+      '386': 'SI',    // Slovenia
+      '387': 'BA',    // Bosnia and Herzegovina
+      '389': 'MK',    // North Macedonia
+      '420': 'CZ',    // Czech Republic
+      '421': 'SK',    // Slovakia
+      '423': 'LI',    // Liechtenstein
+      '500': 'FK',    // Falkland Islands
+      '501': 'BZ',    // Belize
+      '502': 'GT',    // Guatemala
+      '503': 'SV',    // El Salvador
+      '504': 'HN',    // Honduras
+      '505': 'NI',    // Nicaragua
+      '506': 'CR',    // Costa Rica
+      '507': 'PA',    // Panama
+      '508': 'PM',    // Saint Pierre and Miquelon
+      '509': 'HT',    // Haiti
+      '590': 'BL',    // Saint Barthélemy
+      '591': 'BO',    // Bolivia
+      '592': 'GY',    // Guyana
+      '593': 'EC',    // Ecuador
+      '594': 'GF',    // French Guiana
+      '595': 'PY',    // Paraguay
+      '596': 'MQ',    // Martinique
+      '597': 'SR',    // Suriname
+      '598': 'UY',    // Uruguay
+      '599': 'CW',    // Curaçao / Caribbean Netherlands
+      '670': 'TL',    // East Timor
+      '672': 'AQ',    // Australian External Territories
+      '673': 'BN',    // Brunei
+      '674': 'NR',    // Nauru
+      '675': 'PG',    // Papua New Guinea
+      '676': 'TO',    // Tonga
+      '677': 'SB',    // Solomon Islands
+      '678': 'VU',    // Vanuatu
+      '679': 'FJ',    // Fiji
+      '680': 'PW',    // Palau
+      '681': 'WF',    // Wallis and Futuna
+      '682': 'CK',    // Cook Islands
+      '683': 'NU',    // Niue
+      '685': 'WS',    // Samoa
+      '686': 'KI',    // Kiribati
+      '687': 'NC',    // New Caledonia
+      '688': 'TV',    // Tuvalu
+      '689': 'PF',    // French Polynesia
+      '850': 'KP',    // North Korea
+      '852': 'HK',    // Hong Kong
+      '853': 'MO',    // Macau
+      '855': 'KH',    // Cambodia
+      '856': 'LA',    // Laos
+      '880': 'BD',    // Bangladesh
+      '886': 'TW',    // Taiwan
+      '960': 'MV',    // Maldives
+      '961': 'LB',    // Lebanon
+      '962': 'JO',    // Jordan
+      '963': 'SY',    // Syria
+      '964': 'IQ',    // Iraq
+      '965': 'KW',    // Kuwait
+      '966': 'SA',    // Saudi Arabia
+      '967': 'YE',    // Yemen
+      '968': 'OM',    // Oman
+      '970': 'PS',    // Palestine
+      '971': 'AE',    // United Arab Emirates
+      '972': 'IL',    // Israel
+      '973': 'BH',    // Bahrain
+      '974': 'QA',    // Qatar
+      '975': 'BT',    // Bhutan
+      '976': 'MN',    // Mongolia
+      '977': 'NP',    // Nepal
+      '992': 'TJ',    // Tajikistan
+      '993': 'TM',    // Turkmenistan
+      '994': 'AZ',    // Azerbaijan
+      '995': 'GE',    // Georgia
+      '996': 'KG',    // Kyrgyzstan
+      '998': 'UZ'     // Uzbekistan
+    };
+  }
+
+  /**
+   * Normalize country code and area code parameters
+   * Converts phone country codes to ISO codes automatically
+   * @param {string} countryCode - ISO country code or phone country code
+   * @param {string|number} areaCode - Area code or potentially a phone country code
+   * @returns {Object} { countryCode: ISO code, areaCode: normalized area code, wasConverted: boolean }
+   */
+  normalizeCountryAndAreaCode(countryCode, areaCode) {
+    let normalizedCountryCode = countryCode;
+    let normalizedAreaCode = areaCode;
+    let wasConverted = false;
+    const originalCountryCode = countryCode;
+    const originalAreaCode = areaCode;
+
+    // Convert countryCode if it's a phone country code (numeric string)
+    if (countryCode && /^\d+$/.test(String(countryCode))) {
+      const isoCode = this.phoneCountryCodeToISO[String(countryCode)];
+      if (isoCode) {
+        normalizedCountryCode = isoCode;
+        wasConverted = true;
+        Logger.debug('Converted phone country code to ISO', {
+          phoneCode: countryCode,
+          isoCode: isoCode
+        });
+      }
+    }
+
+    // If areaCode is provided, check if it's actually a phone country code
+    // This handles cases like: countryCode=US&areaCode=44 (should be countryCode=GB)
+    if (areaCode) {
+      const areaCodeStr = String(areaCode).trim();
+      
+      // Check if areaCode matches a phone country code
+      const isoFromAreaCode = this.phoneCountryCodeToISO[areaCodeStr];
+      
+      if (isoFromAreaCode) {
+        // If countryCode is US/CA or not set, and areaCode is a phone country code,
+        // treat areaCode as the country code
+        if (!countryCode || countryCode === 'US' || countryCode === 'CA') {
+          // Special case: if areaCode is "1", it's US/CA, so keep it as areaCode
+          if (areaCodeStr === '1') {
+            normalizedCountryCode = 'US';
+            normalizedAreaCode = null; // Remove areaCode since 1 is the country code
+            wasConverted = true;
+          } else {
+            // areaCode is actually a phone country code, use it as countryCode
+            normalizedCountryCode = isoFromAreaCode;
+            normalizedAreaCode = null; // Clear areaCode since it was actually a country code
+            wasConverted = true;
+            Logger.debug('Detected phone country code in areaCode parameter', {
+              originalAreaCode: areaCode,
+              convertedToCountryCode: isoFromAreaCode
+            });
+          }
+        } else if (normalizedCountryCode === 'US' || normalizedCountryCode === 'CA') {
+          // If we still have US/CA and areaCode is a phone country code, convert it
+          if (areaCodeStr !== '1') {
+            normalizedCountryCode = isoFromAreaCode;
+            normalizedAreaCode = null;
+            wasConverted = true;
+            Logger.debug('Converted areaCode (phone country code) to countryCode', {
+              originalAreaCode: areaCode,
+              convertedToCountryCode: isoFromAreaCode
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      countryCode: normalizedCountryCode,
+      areaCode: normalizedAreaCode,
+      wasConverted,
+      originalCountryCode,
+      originalAreaCode
+    };
   }
 
   /**
@@ -784,12 +1068,18 @@ class TwilioService {
     try {
       Logger.info('Fetching Twilio phone numbers', { subaccountId });
 
-      // Check cache first
+      // Don't use cache - always fetch fresh data from Twilio
       const cacheKey = `twilio:phoneNumbers:${subaccountId}`;
-      const cachedData = await redisService.get(cacheKey);
-      if (cachedData) {
-        Logger.debug('Using cached phone numbers', { subaccountId });
-        return JSON.parse(cachedData);
+      
+      // Clear any existing cache to ensure fresh data
+      try {
+        await redisService.del(cacheKey);
+        Logger.debug('Cleared cached phone numbers', { subaccountId });
+      } catch (cacheError) {
+        Logger.warn('Failed to clear cache (non-critical)', {
+          subaccountId,
+          error: cacheError.message
+        });
       }
 
       const client = await this.getTwilioClient(subaccountId);
@@ -806,34 +1096,194 @@ class TwilioService {
       const trunkSid = twilioConnector?.metadata?.retellIntegration?.trunkSid;
 
       // Fetch all incoming phone numbers
-      const phoneNumbers = await client.incomingPhoneNumbers.list();
+      // Fetch with full details to get locality and country information
+      const phoneNumbers = await client.incomingPhoneNumbers.list({ limit: 1000 });
 
       // Filter out numbers linked to the trunk
       const availableNumbers = phoneNumbers.filter(number => {
         return !trunkSid || number.trunkSid !== trunkSid;
       });
 
+      // Fetch detailed information for each number to get locality and country code
+      // Note: Twilio's list() may not include all fields, so we use Lookup API for locality/country
+      const phoneNumbersWithDetails = await Promise.all(
+        availableNumbers.map(async (number) => {
+          try {
+            let locality = null;
+            let countryCode = null;
+            let region = null;
+
+            // Fetch individual phone number details (may include locality/country)
+            try {
+              const fullDetails = await client.incomingPhoneNumbers(number.sid).fetch();
+              locality = fullDetails.locality || null;
+              countryCode = fullDetails.isoCountry || null;
+              region = fullDetails.region || null;
+            } catch (fetchError) {
+              // Individual fetch may not include locality/country, continue to Lookup API
+            }
+
+            // If we don't have locality/country from individual fetch, use Lookup API
+            if (!locality || !countryCode) {
+              try {
+                // Use Lookup API v1 for country code (most reliable)
+                const lookupResult = await client.lookups.v1
+                  .phoneNumbers(number.phoneNumber)
+                  .fetch();
+                
+                if (!countryCode) {
+                  countryCode = lookupResult.countryCode || null;
+                }
+              } catch (lookupV1Error) {
+                Logger.debug('Lookup API v1 failed', {
+                  phoneNumber: number.phoneNumber,
+                  error: lookupV1Error.message
+                });
+              }
+
+              // Try Lookup API v2 for locality and region (if available)
+              if (!locality) {
+                try {
+                  const lookupV2Result = await client.lookups.v2
+                    .phoneNumbers(number.phoneNumber)
+                    .fetch();
+                  
+                  locality = lookupV2Result.locality || null;
+                  region = lookupV2Result.region || null;
+                  
+                  // Use v2 countryCode if we still don't have it
+                  if (!countryCode) {
+                    countryCode = lookupV2Result.countryCode || null;
+                  }
+                } catch (lookupV2Error) {
+                  Logger.debug('Lookup API v2 failed', {
+                    phoneNumber: number.phoneNumber,
+                    error: lookupV2Error.message
+                  });
+                }
+              }
+            }
+
+            // Fallback: Extract country code from phone number if Lookup APIs failed
+            if (!countryCode) {
+              const phoneStr = number.phoneNumber.replace(/[^0-9+]/g, '');
+              if (phoneStr.startsWith('+1')) {
+                countryCode = 'US';
+              } else if (phoneStr.startsWith('+44')) {
+                countryCode = 'GB';
+              } else if (phoneStr.startsWith('+')) {
+                // Map common country codes
+                const countryCodeMap = {
+                  '+1': 'US',
+                  '+44': 'GB',
+                  '+33': 'FR',
+                  '+49': 'DE',
+                  '+39': 'IT',
+                  '+34': 'ES',
+                  '+31': 'NL',
+                  '+32': 'BE',
+                  '+41': 'CH',
+                  '+43': 'AT',
+                  '+61': 'AU',
+                  '+81': 'JP',
+                  '+86': 'CN',
+                  '+91': 'IN',
+                  '+55': 'BR',
+                  '+52': 'MX'
+                };
+                // Check 2-digit prefixes first, then 3-digit
+                const prefix2 = phoneStr.substring(0, 2);
+                const prefix3 = phoneStr.substring(0, 3);
+                countryCode = countryCodeMap[prefix2] || countryCodeMap[prefix3] || null;
+              }
+            }
+
+            return {
+              sid: number.sid,
+              phoneNumber: number.phoneNumber,
+              friendlyName: number.friendlyName,
+              capabilities: number.capabilities,
+              smsUrl: number.smsUrl,
+              voiceUrl: number.voiceUrl,
+              statusCallback: number.statusCallback,
+              trunkSid: number.trunkSid,
+              emergencyAddressSid: number.emergencyAddressSid,
+              addressSid: number.addressSid,
+              dateCreated: number.dateCreated,
+              dateUpdated: number.dateUpdated,
+              locality: locality,
+              region: region,
+              countryCode: countryCode
+            };
+          } catch (error) {
+            Logger.warn('Failed to fetch details for phone number', {
+              sid: number.sid,
+              phoneNumber: number.phoneNumber,
+              error: error.message
+            });
+            // Fallback to basic info if detailed fetch fails
+            // Try to extract country code from phone number
+            let countryCode = null;
+            const phoneStr = number.phoneNumber.replace(/[^0-9+]/g, '');
+            if (phoneStr.startsWith('+1')) {
+              countryCode = 'US';
+            } else if (phoneStr.startsWith('+44')) {
+              countryCode = 'GB';
+            } else if (phoneStr.startsWith('+')) {
+              // Map common country codes
+              const countryCodeMap = {
+                '+1': 'US',
+                '+44': 'GB',
+                '+33': 'FR',
+                '+49': 'DE',
+                '+39': 'IT',
+                '+34': 'ES',
+                '+31': 'NL',
+                '+32': 'BE',
+                '+41': 'CH',
+                '+43': 'AT',
+                '+61': 'AU',
+                '+81': 'JP',
+                '+86': 'CN',
+                '+91': 'IN',
+                '+55': 'BR',
+                '+52': 'MX'
+              };
+              // Check 2-digit prefixes first, then 3-digit
+              const prefix2 = phoneStr.substring(0, 2);
+              const prefix3 = phoneStr.substring(0, 3);
+              countryCode = countryCodeMap[prefix2] || countryCodeMap[prefix3] || null;
+            }
+
+            return {
+              sid: number.sid,
+              phoneNumber: number.phoneNumber,
+              friendlyName: number.friendlyName,
+              capabilities: number.capabilities,
+              smsUrl: number.smsUrl,
+              voiceUrl: number.voiceUrl,
+              statusCallback: number.statusCallback,
+              trunkSid: number.trunkSid,
+              emergencyAddressSid: number.emergencyAddressSid,
+              addressSid: number.addressSid,
+              dateCreated: number.dateCreated,
+              dateUpdated: number.dateUpdated,
+              locality: null,
+              region: null,
+              countryCode: countryCode
+            };
+          }
+        })
+      );
+
       const result = {
-        phoneNumbers: availableNumbers.map(number => ({
-          sid: number.sid,
-          phoneNumber: number.phoneNumber,
-          friendlyName: number.friendlyName,
-          capabilities: number.capabilities,
-          smsUrl: number.smsUrl,
-          voiceUrl: number.voiceUrl,
-          statusCallback: number.statusCallback,
-          trunkSid: number.trunkSid,
-          emergencyAddressSid: number.emergencyAddressSid,
-          addressSid: number.addressSid,
-          dateCreated: number.dateCreated,
-          dateUpdated: number.dateUpdated
-        })),
+        phoneNumbers: phoneNumbersWithDetails,
         total: availableNumbers.length,
         trunkLinkedCount: phoneNumbers.length - availableNumbers.length
       };
 
-      // Cache for 5 minutes
-      await redisService.set(cacheKey, JSON.stringify(result), 300);
+      // Don't cache - always return fresh data from Twilio
+      // Cache was removed per user request to ensure real-time data
 
       Logger.info('Phone numbers fetched successfully', { 
         subaccountId, 
@@ -856,15 +1306,30 @@ class TwilioService {
    */
   async searchAvailablePhoneNumbers(subaccountId, options = {}) {
     try {
-      const {
+      let {
         countryCode = 'US',
         areaCode = null,
         contains = null,
-        smsEnabled = true,
-        voiceEnabled = true,
-        mmsEnabled = false,
-        limit = 20
+        smsEnabled = undefined, // undefined = don't filter by SMS (more flexible)
+        voiceEnabled = undefined, // undefined = don't filter by Voice (more flexible)
+        mmsEnabled = undefined, // undefined = don't filter by MMS (more flexible)
+        limit = 20,
+        type = 'local' // 'local', 'mobile', 'tollFree', or 'all'
       } = options;
+
+      // Normalize country code and area code (convert phone country codes to ISO codes)
+      const normalized = this.normalizeCountryAndAreaCode(countryCode, areaCode);
+      countryCode = normalized.countryCode;
+      areaCode = normalized.areaCode;
+
+      if (normalized.wasConverted) {
+        Logger.info('Normalized country/area codes', {
+          originalCountryCode: normalized.originalCountryCode,
+          originalAreaCode: normalized.originalAreaCode,
+          normalizedCountryCode: countryCode,
+          normalizedAreaCode: areaCode
+        });
+      }
 
       Logger.info('Searching for available phone numbers', { 
         subaccountId, 
@@ -873,8 +1338,54 @@ class TwilioService {
         contains 
       });
 
+      // Validate areaCode BEFORE checking cache (to catch invalid requests early)
+      if (areaCode) {
+        // Convert to string for validation
+        const areaCodeStr = String(areaCode).trim();
+        
+        Logger.debug('Validating area code', { 
+          areaCode, 
+          areaCodeStr, 
+          countryCode,
+          length: areaCodeStr.length 
+        });
+        
+        // For US/Canada, area codes must be 3 digits and cannot start with 0 or 1
+        if (countryCode === 'US' || countryCode === 'CA') {
+          const isValidUSAreaCode = /^[2-9]\d{2}$/.test(areaCodeStr);
+          Logger.debug('US area code validation', { 
+            areaCodeStr, 
+            isValidUSAreaCode,
+            regexMatch: /^[2-9]\d{2}$/.test(areaCodeStr)
+          });
+          
+          if (!isValidUSAreaCode) {
+            // At this point, normalization should have already handled phone country codes
+            // If we still have an invalid area code, it's truly invalid
+            let errorMsg = `Invalid area code: ${areaCode}. US/Canada area codes must be 3 digits starting with 2-9 (e.g., 415, 212, 310)`;
+            
+            Logger.warn('Invalid area code provided', { areaCode, countryCode, errorMsg });
+            
+            // Clear any cached invalid result for this area code
+            const invalidCacheKey = `twilio:available:${subaccountId}:${countryCode}:${areaCode}:${contains || 'any'}:${smsEnabled}:${voiceEnabled}:${mmsEnabled}:${limit}:${type || 'local'}`;
+            await redisService.del(invalidCacheKey).catch(() => {
+              // Ignore cache deletion errors
+            });
+            
+            throw new Error(errorMsg);
+          }
+        }
+        
+        // For other countries, validate it's numeric
+        if (countryCode !== 'US' && countryCode !== 'CA') {
+          if (!/^\d+$/.test(areaCodeStr)) {
+            throw new Error(`Invalid area code: ${areaCode}. Area code must be numeric`);
+          }
+        }
+      }
+
       // Create cache key based on search parameters
-      const cacheKey = `twilio:available:${subaccountId}:${countryCode}:${areaCode || 'any'}:${contains || 'any'}:${smsEnabled}:${voiceEnabled}:${mmsEnabled}:${limit}`;
+      const cacheKey = `twilio:available:${subaccountId}:${countryCode}:${areaCode || 'any'}:${contains || 'any'}:${smsEnabled}:${voiceEnabled}:${mmsEnabled}:${limit}:${type || 'local'}`;
       const cachedData = await redisService.get(cacheKey);
       if (cachedData) {
         Logger.debug('Using cached available phone numbers', { subaccountId });
@@ -888,16 +1399,72 @@ class TwilioService {
         limit: Math.min(limit, 30) // Twilio max is 30
       };
 
-      if (areaCode) searchParams.areaCode = areaCode;
+      if (areaCode) {
+        // Use validated areaCode (convert to string/number as Twilio expects)
+        searchParams.areaCode = String(areaCode).trim();
+      }
       if (contains) searchParams.contains = contains;
-      if (smsEnabled) searchParams.smsEnabled = true;
-      if (voiceEnabled) searchParams.voiceEnabled = true;
-      if (mmsEnabled) searchParams.mmsEnabled = true;
+      // Only add capability filters if explicitly set (true or false)
+      // This allows finding numbers with any capabilities, matching Twilio UI behavior
+      if (smsEnabled !== undefined) searchParams.smsEnabled = smsEnabled === true || smsEnabled === 'true';
+      if (voiceEnabled !== undefined) searchParams.voiceEnabled = voiceEnabled === true || voiceEnabled === 'true';
+      if (mmsEnabled !== undefined) searchParams.mmsEnabled = mmsEnabled === true || mmsEnabled === 'true';
 
-      // Search for local phone numbers
-      const availableNumbers = await client.availablePhoneNumbers(countryCode)
-        .local
-        .list(searchParams);
+      // Search for phone numbers based on type
+      // Support: 'local', 'mobile', 'tollFree', or 'all' (searches all types)
+      let availableNumbers = [];
+      const numberTypes = type === 'all' ? ['local', 'mobile', 'tollFree'] : [type];
+      
+      for (const numberType of numberTypes) {
+        try {
+          let numbers;
+          switch (numberType) {
+            case 'local':
+              numbers = await client.availablePhoneNumbers(countryCode)
+                .local
+                .list(searchParams);
+              break;
+            case 'mobile':
+              numbers = await client.availablePhoneNumbers(countryCode)
+                .mobile
+                .list(searchParams);
+              break;
+            case 'tollFree':
+              numbers = await client.availablePhoneNumbers(countryCode)
+                .tollFree
+                .list(searchParams);
+              break;
+            default:
+              Logger.warn('Unknown number type, defaulting to local', { numberType, countryCode });
+              numbers = await client.availablePhoneNumbers(countryCode)
+                .local
+                .list(searchParams);
+          }
+          
+          // Add type information to each number
+          numbers.forEach(num => {
+            num._numberType = numberType;
+          });
+          
+          availableNumbers = availableNumbers.concat(numbers);
+          
+          // If we have enough numbers and not searching 'all', break early
+          if (availableNumbers.length >= limit && type !== 'all') {
+            break;
+          }
+        } catch (error) {
+          // Some countries don't support all number types (e.g., mobile, tollFree)
+          // Log but continue with other types
+          Logger.debug(`Number type ${numberType} not available for ${countryCode}`, {
+            error: error.message,
+            countryCode,
+            numberType
+          });
+        }
+      }
+      
+      // Limit results to requested limit
+      availableNumbers = availableNumbers.slice(0, limit);
 
       const result = {
         availableNumbers: availableNumbers.map(number => ({
@@ -909,7 +1476,8 @@ class TwilioService {
           isoCountry: number.isoCountry,
           addressRequirements: number.addressRequirements,
           capabilities: number.capabilities,
-          beta: number.beta
+          beta: number.beta,
+          numberType: number._numberType || type
         })),
         total: availableNumbers.length,
         searchCriteria: {
@@ -918,7 +1486,8 @@ class TwilioService {
           contains,
           smsEnabled,
           voiceEnabled,
-          mmsEnabled
+          mmsEnabled,
+          type
         }
       };
 
@@ -966,29 +1535,169 @@ class TwilioService {
       }
 
       const emergencyAddressId = twilioConnector.metadata?.retellIntegration?.emergencyAddressId;
+      const bundleSid = twilioConnector.metadata?.retellIntegration?.bundleSid;
       const trunkSid = twilioConnector.metadata?.retellIntegration?.trunkSid;
       const terminationSipUri = twilioConnector.metadata?.retellIntegration?.terminationSipUri;
       const sipCredentials = twilioConnector.metadata?.retellIntegration?.sipCredentials;
 
+      // Determine country code from phone number to check if bundle is required
+      const phoneNumberStr = phoneNumber.replace(/[^0-9+]/g, '');
+      let countryCode = 'US'; // default
+      if (phoneNumberStr.startsWith('+44')) {
+        countryCode = 'GB';
+      } else if (phoneNumberStr.startsWith('+1')) {
+        countryCode = 'US';
+      } else if (phoneNumberStr.startsWith('+')) {
+        // Try to detect country code
+        const phoneCode = phoneNumberStr.substring(1, 3);
+        const isoCode = this.phoneCountryCodeToISO[phoneCode] || this.phoneCountryCodeToISO[phoneNumberStr.substring(1, 4)];
+        if (isoCode) countryCode = isoCode;
+      }
+
+      // Countries that require bundles (regulatory compliance)
+      const countriesRequiringBundles = ['GB', 'AU', 'CA']; // UK, Australia, Canada
+      const requiresBundle = countriesRequiringBundles.includes(countryCode);
+
       if (!emergencyAddressId) {
         throw new Error('Emergency address not configured. Please run Twilio setup first.');
+      }
+
+      if (requiresBundle && !bundleSid) {
+        throw new Error(`Regulatory bundle required for ${countryCode} phone numbers. Please create a compliance bundle in Twilio Console and configure it in the connector settings.`);
       }
 
       if (!trunkSid) {
         throw new Error('SIP trunk not configured. Please run Twilio setup first.');
       }
 
+      // Determine number type by checking available numbers
+      // This helps validate bundle type compatibility
+      let numberType = null;
+      if (requiresBundle && bundleSid) {
+        try {
+          Logger.debug('Checking number type for bundle validation', { phoneNumber, countryCode });
+          
+          // Try to find the number in available numbers to determine its type
+          const searchResults = await this.searchAvailablePhoneNumbers(subaccountId, {
+            countryCode,
+            limit: 100,
+            type: 'all'
+          });
+          
+          const foundNumber = searchResults.availableNumbers.find(
+            num => num.phoneNumber === phoneNumber
+          );
+          
+          if (foundNumber) {
+            numberType = foundNumber.numberType; // 'local', 'mobile', or 'tollFree'
+            Logger.debug('Number type determined', { phoneNumber, numberType });
+          } else {
+            Logger.warn('Could not determine number type from available numbers', { phoneNumber });
+          }
+        } catch (error) {
+          Logger.warn('Failed to determine number type, proceeding anyway', { 
+            phoneNumber, 
+            error: error.message 
+          });
+        }
+      }
+
       // Generate friendly name
       const friendlyName = `voone_${phoneNumber.replace(/\+/g, '')}`;
 
       // Step 1: Purchase the phone number
-      Logger.info('Step 1: Purchasing phone number', { phoneNumber, friendlyName });
+      Logger.info('Step 1: Purchasing phone number', { phoneNumber, friendlyName, numberType });
       const purchaseParams = { 
         phoneNumber,
         friendlyName
       };
 
-      const purchasedNumber = await client.incomingPhoneNumbers.create(purchaseParams);
+      // For certain countries (like UK), Twilio requires the emergency address during purchase
+      // Check if we have an emergency address and include it in purchase params
+      if (emergencyAddressId) {
+        purchaseParams.addressSid = emergencyAddressId;
+        Logger.debug('Including emergency address in purchase', { 
+          phoneNumber, 
+          emergencyAddressId 
+        });
+      }
+
+      // For certain countries (like UK, AU, CA), Twilio requires a regulatory bundle during purchase
+      // Only include bundle if we have it and it's required
+      // Note: Bundle type validation happens at Twilio level - if bundle type doesn't match number type,
+      // Twilio will reject it with a clear error message
+      if (requiresBundle && bundleSid) {
+        purchaseParams.bundleSid = bundleSid;
+        Logger.debug('Including regulatory bundle in purchase', { 
+          phoneNumber, 
+          bundleSid,
+          countryCode,
+          numberType
+        });
+        
+        // Warn if we detected number type and it might not match bundle
+        if (numberType && numberType === 'local') {
+          Logger.warn('Purchasing local number with bundle - ensure bundle type is "Local"', {
+            phoneNumber,
+            numberType,
+            bundleSid
+          });
+        } else if (numberType && numberType === 'mobile') {
+          Logger.info('Purchasing mobile number with bundle - bundle should be "Mobile" type', {
+            phoneNumber,
+            numberType,
+            bundleSid
+          });
+        }
+      }
+
+      let purchasedNumber;
+      try {
+        purchasedNumber = await client.incomingPhoneNumbers.create(purchaseParams);
+      } catch (purchaseError) {
+        // Check if error is related to bundle type mismatch
+        if (purchaseError.message && purchaseError.message.includes('does not have the correct regulation type')) {
+          // Try to determine number type if we didn't get it earlier
+          let detectedNumberType = numberType;
+          if (!detectedNumberType) {
+            // UK number patterns: mobile usually start with +447, local with +441 or +4420
+            const phoneStr = phoneNumber.replace(/[^0-9+]/g, '');
+            if (phoneStr.startsWith('+447') && phoneStr.length === 13) {
+              detectedNumberType = 'mobile';
+            } else if (phoneStr.startsWith('+441') || phoneStr.startsWith('+4420')) {
+              detectedNumberType = 'local';
+            }
+          }
+          
+          // Build helpful error message
+          let errorMsg = `Bundle type mismatch: Your configured bundle (${bundleSid}) is for a different number type. `;
+          
+          if (detectedNumberType === 'mobile') {
+            errorMsg += `You're trying to purchase a mobile number, but your bundle appears to be for local numbers. ` +
+              `Please search for mobile numbers using: &type=mobile`;
+          } else if (detectedNumberType === 'local') {
+            errorMsg += `You're trying to purchase a local number, but your bundle is for mobile numbers. ` +
+              `Please either: 1) Search for mobile numbers using: &type=mobile, ` +
+              `or 2) Create a "Local" bundle in Twilio Console and update the bundle SID using: ` +
+              `PUT /api/connectors/:subaccountId/twilio/bundle`;
+          } else {
+            errorMsg += `The number type couldn't be determined. ` +
+              `Please ensure your bundle type matches the number type you're trying to purchase. ` +
+              `For UK numbers: Mobile bundle for mobile numbers (+447...), Local bundle for local numbers (+441... or +4420...).`;
+          }
+          
+          Logger.error('Bundle type mismatch during purchase', {
+            phoneNumber,
+            detectedNumberType,
+            numberType,
+            bundleSid,
+            error: purchaseError.message
+          });
+          throw new Error(errorMsg);
+        }
+        // Re-throw other errors as-is
+        throw purchaseError;
+      }
       
       Logger.info('Phone number purchased', { 
         sid: purchasedNumber.sid,
@@ -997,16 +1706,21 @@ class TwilioService {
 
       try {
         // Step 2: Integrate with emergency address
+        // Note: If addressSid was provided during purchase, the address is already set
+        // But we still call this to ensure it's properly configured (idempotent operation)
         Logger.info('Step 2: Integrating with emergency address', { 
           numberSid: purchasedNumber.sid,
           emergencyAddressId 
         });
 
-        await this.integrateNumberWithEmergencyAddress(
-          subaccountId, 
-          purchasedNumber.sid, 
-          emergencyAddressId
-        );
+        // Only integrate if we have an emergency address
+        if (emergencyAddressId) {
+          await this.integrateNumberWithEmergencyAddress(
+            subaccountId, 
+            purchasedNumber.sid, 
+            emergencyAddressId
+          );
+        }
 
         // Step 3: Register to trunk
         Logger.info('Step 3: Registering number to trunk', { 
@@ -2021,8 +2735,7 @@ class TwilioService {
 
       // Delete from Twilio
       try {
-        const twilioCredentials = await this.getTwilioCredentials(subaccountId);
-        const client = twilio(twilioCredentials.accountSid, twilioCredentials.authToken);
+        const client = await this.getTwilioClient(subaccountId);
 
         // Get the phone number SID
         const incomingNumbers = await client.incomingPhoneNumbers.list({
@@ -2031,6 +2744,28 @@ class TwilioService {
 
         if (incomingNumbers.length > 0) {
           const phoneNumberSid = incomingNumbers[0].sid;
+          
+          // Step 1: Remove emergency address if present (required by Twilio before deletion)
+          try {
+            Logger.debug('Removing emergency address from phone number before deletion', { 
+              phoneNumber, 
+              phoneNumberSid 
+            });
+            
+            await client.incomingPhoneNumbers(phoneNumberSid).update({
+              emergencyAddressSid: '' // Remove emergency address
+            });
+            
+            Logger.debug('Emergency address removed successfully', { phoneNumber });
+          } catch (addressError) {
+            Logger.warn('Failed to remove emergency address (may not be set)', {
+              phoneNumber,
+              error: addressError.message
+            });
+            // Continue with deletion even if address removal fails
+          }
+          
+          // Step 2: Delete the phone number
           await client.incomingPhoneNumbers(phoneNumberSid).remove();
           results.twilio.success = true;
           Logger.info('Phone number deleted from Twilio', { phoneNumber });

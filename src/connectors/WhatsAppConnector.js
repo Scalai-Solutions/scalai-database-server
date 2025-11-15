@@ -20,6 +20,7 @@ class WhatsAppConnector extends BaseChatConnector {
     this.sessionPath = path.join(__dirname, '../../.wwebjs_auth', config.sessionId || 'default');
     this.messageHandlers = [];
     this.connectionPromise = null;
+    this._initializing = false; // Flag to prevent multiple simultaneous initializations
   }
 
   /**
@@ -27,6 +28,24 @@ class WhatsAppConnector extends BaseChatConnector {
    * @param {boolean} forceNew - If true, will destroy existing client and create a new one
    */
   async initialize(forceNew = false) {
+    // Prevent multiple simultaneous initializations
+    if (this._initializing) {
+      Logger.warn('WhatsApp initialization already in progress, waiting...', {
+        sessionId: this.config.sessionId
+      });
+      // Wait for existing initialization to complete
+      while (this._initializing) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      // Check if initialization succeeded
+      if (this.client) {
+        return true;
+      }
+      // If initialization failed, continue with new attempt
+    }
+
+    this._initializing = true;
+    
     try {
       // If forceNew is true, destroy existing client first
       if (forceNew && this.client) {
@@ -50,9 +69,18 @@ class WhatsAppConnector extends BaseChatConnector {
       }
 
       if (this.client && !forceNew) {
-        Logger.warn('WhatsApp client already initialized', {
-          sessionId: this.config.sessionId
+        Logger.info('WhatsApp client already initialized, ensuring event listeners are set up', {
+          sessionId: this.config.sessionId,
+          hasEventListeners: !!this.client.listenerCount('message')
         });
+        // Ensure event listeners are set up even if client already exists
+        // This is important if connector was reused
+        if (this.client.listenerCount('message') === 0) {
+          Logger.warn('No message event listeners found on existing client, setting up now', {
+            sessionId: this.config.sessionId
+          });
+          this.setupEventListeners();
+        }
         return true;
       }
 
@@ -139,9 +167,11 @@ class WhatsAppConnector extends BaseChatConnector {
       this.setupEventListeners();
 
       // Create a promise that resolves when client is ready or rejects on auth failure
+      // Note: This promise is for waiting for connection, but QR generation happens independently
       let timeoutHandle = null;
       let readyHandler = null;
       let authFailureHandler = null;
+      let qrHandler = null;
       
       this.connectionPromise = new Promise((resolve, reject) => {
         timeoutHandle = setTimeout(() => {
@@ -153,6 +183,9 @@ class WhatsAppConnector extends BaseChatConnector {
             if (this.client && authFailureHandler) {
               this.client.removeListener('auth_failure', authFailureHandler);
             }
+            if (this.client && qrHandler) {
+              this.client.removeListener('qr', qrHandler);
+            }
           } catch (cleanupError) {
             Logger.warn('Error cleaning up event listeners on timeout', {
               error: cleanupError.message,
@@ -160,19 +193,29 @@ class WhatsAppConnector extends BaseChatConnector {
             });
           }
           
-          // Update state
-          this.isConnected = false;
-          this.isActive = false;
-          
-          // Log the timeout
-          Logger.warn('WhatsApp connection timeout', {
-            sessionId: this.config.sessionId,
-            timeoutMs: 120000
-          });
-          
-          // Reject with error
-          reject(new Error('WhatsApp connection timeout'));
-        }, 120000); // 2 minutes timeout
+          // If QR code was generated, don't treat timeout as error
+          // QR generation is a valid state - user just needs more time to scan
+          if (this.qrCodeDataUrl) {
+            Logger.info('WhatsApp connection timeout, but QR code is available. User can still scan.', {
+              sessionId: this.config.sessionId,
+              timeoutMs: 300000
+            });
+            // Don't reject - QR code is available, connection can happen later via 'ready' event
+            // Just resolve with a flag indicating QR is available
+            resolve({ qrAvailable: true, timeout: true });
+          } else {
+            // No QR code generated - this is a real timeout/error
+            Logger.warn('WhatsApp connection timeout - no QR code generated', {
+              sessionId: this.config.sessionId,
+              timeoutMs: 300000
+            });
+            // Update state
+            this.isConnected = false;
+            this.isActive = false;
+            // Reject only if no QR was generated - this is a real error
+            reject(new Error('WhatsApp connection timeout - no QR code generated'));
+          }
+        }, 300000); // 5 minutes timeout (increased from 2 minutes to give more time)
 
         readyHandler = () => {
           if (timeoutHandle) {
@@ -181,7 +224,7 @@ class WhatsAppConnector extends BaseChatConnector {
           }
           this.isConnected = true;
           this.isActive = true;
-          resolve(true);
+          resolve({ connected: true });
         };
 
         authFailureHandler = (msg) => {
@@ -194,21 +237,42 @@ class WhatsAppConnector extends BaseChatConnector {
           reject(new Error(`WhatsApp authentication failed: ${msg}`));
         };
 
+        // Also listen for QR generation - if QR is generated, connection is progressing
+        qrHandler = () => {
+          Logger.debug('QR code generated during connection wait', {
+            sessionId: this.config.sessionId
+          });
+          // Don't resolve yet - wait for actual connection or timeout
+          // But this indicates progress, so we can extend timeout if needed
+        };
+
         this.client.once('ready', readyHandler);
         this.client.once('auth_failure', authFailureHandler);
+        this.client.on('qr', qrHandler); // Use 'on' not 'once' - QR can be regenerated
       });
 
       // Add error handler to prevent unhandled promise rejections
       this.connectionPromise.catch((error) => {
-        // This catch prevents unhandled promise rejection crashes
-        Logger.error('WhatsApp connection promise rejected', {
-          error: error.message,
-          sessionId: this.config.sessionId,
-          stack: error.stack
-        });
-        // Update state
-        this.isConnected = false;
-        this.isActive = false;
+        // Only log as error if QR code wasn't generated
+        // If QR is available, timeout is expected and not an error
+        if (!this.qrCodeDataUrl && !error.message.includes('QR')) {
+          Logger.error('WhatsApp connection promise rejected', {
+            error: error.message,
+            sessionId: this.config.sessionId,
+            stack: error.stack
+          });
+        } else if (this.qrCodeDataUrl) {
+          // QR is available, so timeout is not an error - just informational
+          Logger.debug('WhatsApp connection promise timeout (QR available)', {
+            sessionId: this.config.sessionId,
+            error: error.message
+          });
+        }
+        // Update state only if it's a real error (not just timeout with QR)
+        if (!this.qrCodeDataUrl) {
+          this.isConnected = false;
+          this.isActive = false;
+        }
         // Clear the promise reference so a new one can be created
         this.connectionPromise = null;
       });
@@ -220,14 +284,28 @@ class WhatsAppConnector extends BaseChatConnector {
         sessionId: this.config.sessionId
       });
 
+      this._initializing = false;
       return true;
     } catch (error) {
       this.isActive = false;
       this.isConnected = false;
-      Logger.error('Failed to initialize WhatsApp connector', {
-        error: error.message,
-        stack: error.stack
-      });
+      this._initializing = false;
+      
+      // If it's a Puppeteer protocol error, it might be due to browser being closed
+      // during initialization - log as warning instead of error
+      if (error.message.includes('Target closed') || error.message.includes('Protocol error')) {
+        Logger.warn('WhatsApp initialization interrupted (browser closed)', {
+          error: error.message,
+          sessionId: this.config.sessionId,
+          suggestion: 'This may happen if multiple initialization attempts occur simultaneously'
+        });
+      } else {
+        Logger.error('Failed to initialize WhatsApp connector', {
+          error: error.message,
+          stack: error.stack,
+          sessionId: this.config.sessionId
+        });
+      }
       throw error;
     }
   }
@@ -341,20 +419,50 @@ class WhatsAppConnector extends BaseChatConnector {
           });
         }
 
-        Logger.debug('WhatsApp message received', {
+        Logger.info('WhatsApp message received', {
           sessionId: this.config.sessionId,
           from: message.from,
           messageId,
-          hasMedia: message.hasMedia
+          hasMedia: message.hasMedia,
+          hasBody: !!message.body,
+          bodyLength: message.body ? message.body.length : 0,
+          handlerCount: this.messageHandlers.length
         });
 
+        // Check if any handlers are registered
+        if (this.messageHandlers.length === 0) {
+          Logger.error('No message handlers registered! Message will not be processed', {
+            sessionId: this.config.sessionId,
+            from: message.from,
+            messageId
+          });
+          return;
+        }
+
         // Call all registered message handlers
+        Logger.debug('Calling registered message handlers', {
+          sessionId: this.config.sessionId,
+          handlerCount: this.messageHandlers.length,
+          from: message.from
+        });
+        
         for (const handler of this.messageHandlers) {
           try {
+            Logger.debug('Executing message handler', {
+              sessionId: this.config.sessionId,
+              from: message.from
+            });
             await handler(message);
+            Logger.debug('Message handler completed successfully', {
+              sessionId: this.config.sessionId,
+              from: message.from
+            });
           } catch (error) {
             Logger.error('Error in message handler', {
-              error: error.message
+              error: error.message,
+              stack: error.stack,
+              sessionId: this.config.sessionId,
+              from: message.from
             });
           }
         }
@@ -596,14 +704,29 @@ class WhatsAppConnector extends BaseChatConnector {
 
       Logger.info('Message handler registered', {
         sessionId: this.config.sessionId,
-        handlerCount: this.messageHandlers.length
+        handlerCount: this.messageHandlers.length,
+        isConnected: this.isConnected,
+        hasClient: !!this.client,
+        callbackType: typeof callback
       });
+
+      // Verify handler was added
+      if (this.messageHandlers.length === 0) {
+        Logger.error('CRITICAL: Message handler array is empty after registration!', {
+          sessionId: this.config.sessionId
+        });
+      }
 
       return this.formatSuccess({
         message: 'Message handler registered successfully',
         handlerCount: this.messageHandlers.length
       }, 'onMessage');
     } catch (error) {
+      Logger.error('Error registering message handler', {
+        error: error.message,
+        stack: error.stack,
+        sessionId: this.config.sessionId
+      });
       return this.handleError(error, 'onMessage');
     }
   }
@@ -679,9 +802,21 @@ class WhatsAppConnector extends BaseChatConnector {
 
     if (this.connectionPromise) {
       try {
-        return await this.connectionPromise;
+        const result = await this.connectionPromise;
+        // If result indicates QR is available, that's still a valid state
+        if (result && result.qrAvailable) {
+          return { qrAvailable: true, connected: false };
+        }
+        return result;
       } catch (error) {
-        // Connection failed - log and rethrow
+        // If QR code is available, timeout is not a real error
+        if (this.qrCodeDataUrl && error.message.includes('timeout')) {
+          Logger.debug('Connection timeout but QR code available', {
+            sessionId: this.config.sessionId
+          });
+          return { qrAvailable: true, connected: false, timeout: true };
+        }
+        // Real connection failure - log and rethrow
         Logger.error('Failed to wait for WhatsApp connection', {
           error: error.message,
           sessionId: this.config.sessionId

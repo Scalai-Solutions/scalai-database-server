@@ -170,6 +170,22 @@ router.get('/:subaccountId/twilio/availablePhoneNumbers',
   ConnectorController.searchAvailablePhoneNumbers
 );
 
+// PUT /api/connectors/:subaccountId/twilio/emergencyAddress - Update Twilio emergency address ID
+router.put('/:subaccountId/twilio/emergencyAddress',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(10, 60000),
+  ConnectorController.updateTwilioEmergencyAddress
+);
+
+// PUT /api/connectors/:subaccountId/twilio/bundle - Update Twilio bundle SID
+router.put('/:subaccountId/twilio/bundle',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(10, 60000),
+  ConnectorController.updateTwilioBundle
+);
+
 // POST /api/connectors/:subaccountId/twilio/phoneNumbers/purchase - Purchase a phone number
 router.post('/:subaccountId/twilio/phoneNumbers/purchase',
   validateSubaccountId,
