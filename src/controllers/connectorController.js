@@ -2104,6 +2104,146 @@ class ConnectorController {
       });
     }
   }
+
+  /**
+   * Delete Twilio trunk for a subaccount
+   * DELETE /api/connectors/:subaccountId/twilio-trunk
+   * Service-to-service endpoint (requires service auth)
+   */
+  async deleteTwilioTrunk(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const userId = req.user?.id || req.service?.serviceName || 'system';
+
+      Logger.info('Delete Twilio trunk request received', {
+        subaccountId,
+        userId,
+        service: req.service?.serviceName,
+        requestId: req.requestId
+      });
+
+      // Delete the trunk
+      const result = await twilioService.deleteTrunkForSubaccount(subaccountId, userId);
+
+      if (result.success || result.skipped) {
+        Logger.info('Twilio trunk deletion completed', {
+          subaccountId,
+          userId,
+          trunkSid: result.trunkSid,
+          trunkDeleted: result.trunkDeleted,
+          skipped: result.skipped,
+          reason: result.reason
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: result.skipped 
+            ? `Trunk deletion skipped: ${result.reason}` 
+            : 'Twilio trunk deleted successfully',
+          data: result
+        });
+      } else {
+        Logger.warn('Twilio trunk deletion failed', {
+          subaccountId,
+          userId,
+          error: result.error,
+          trunkSid: result.trunkSid
+        });
+
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to delete Twilio trunk',
+          error: result.error,
+          data: result
+        });
+      }
+    } catch (error) {
+      Logger.error('Error in deleteTwilioTrunk controller', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId: req.params.subaccountId,
+        userId: req.user?.id
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error while deleting Twilio trunk',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Release phone numbers from Twilio
+   * POST /api/connectors/:subaccountId/twilio/release-phone-numbers
+   * Service-to-service endpoint (requires service auth)
+   */
+  async releasePhoneNumbersFromTwilio(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { phoneNumbersToRelease } = req.body;
+      const userId = req.user?.id || req.service?.serviceName || 'system';
+
+      Logger.info('Release phone numbers from Twilio request received', {
+        subaccountId,
+        userId,
+        phoneNumberCount: phoneNumbersToRelease?.length || 0,
+        service: req.service?.serviceName,
+        requestId: req.requestId
+      });
+
+      if (!phoneNumbersToRelease || !Array.isArray(phoneNumbersToRelease)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid request: phoneNumbersToRelease must be an array'
+        });
+      }
+
+      // Release the phone numbers
+      const result = await twilioService.releasePhoneNumbersFromTwilio(subaccountId, phoneNumbersToRelease);
+
+      if (result.success) {
+        Logger.info('Phone numbers release completed', {
+          subaccountId,
+          userId,
+          phoneNumbersReleased: result.phoneNumbersReleased?.length || 0,
+          phoneNumbersFailed: result.phoneNumbersFailed?.length || 0
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: 'Phone numbers released from Twilio',
+          data: result
+        });
+      } else {
+        Logger.warn('Phone numbers release failed', {
+          subaccountId,
+          userId,
+          error: result.error
+        });
+
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to release phone numbers from Twilio',
+          error: result.error,
+          data: result
+        });
+      }
+    } catch (error) {
+      Logger.error('Error in releasePhoneNumbersFromTwilio controller', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId: req.params.subaccountId,
+        userId: req.user?.id
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error while releasing phone numbers from Twilio',
+        error: error.message
+      });
+    }
+  }
 }
 
 // Export singleton instance

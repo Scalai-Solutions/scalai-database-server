@@ -3419,6 +3419,317 @@ class TwilioService {
       throw error;
     }
   }
+
+  /**
+   * Delete Twilio trunk for a subaccount
+   * This method records phone numbers attached to the trunk, deletes the trunk,
+   * and returns the phone numbers that need to be released separately
+   * @param {string} subaccountId - The subaccount ID
+   * @param {string} userId - User ID for audit logging
+   * @returns {Promise<Object>} - Deletion results with phone numbers to release
+   */
+  async deleteTrunkForSubaccount(subaccountId, userId) {
+    try {
+      Logger.info('Starting Twilio trunk deletion', {
+        subaccountId,
+        userId
+      });
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+      const { connection } = connectionInfo;
+      
+      // Get Twilio connector configuration
+      const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
+        subaccountId,
+        connectorType: 'twilio'
+      });
+
+      if (!twilioConnector) {
+        return {
+          success: false,
+          skipped: true,
+          reason: 'No Twilio connector found for this subaccount',
+          trunkDeleted: false,
+          phoneNumbersToRelease: []
+        };
+      }
+
+      const trunkSid = twilioConnector?.metadata?.retellIntegration?.trunkSid;
+
+      if (!trunkSid) {
+        return {
+          success: false,
+          skipped: true,
+          reason: 'No trunk SID found in connector metadata',
+          trunkDeleted: false,
+          phoneNumbersToRelease: []
+        };
+      }
+
+      Logger.info('Found trunk SID to delete', {
+        subaccountId,
+        trunkSid
+      });
+
+      // Get Twilio client
+      const client = await this.getTwilioClient(subaccountId);
+
+      // STEP 1: Record all phone numbers attached to the trunk
+      let phoneNumbersToRelease = [];
+      
+      try {
+        const phoneNumbers = await client.trunking.v1
+          .trunks(trunkSid)
+          .phoneNumbers
+          .list();
+        
+        // Record the phone numbers
+        phoneNumbersToRelease = phoneNumbers.map(pn => ({
+          phoneNumber: pn.phoneNumber,
+          sid: pn.sid
+        }));
+        
+        Logger.info('Recorded phone numbers attached to trunk', {
+          subaccountId,
+          trunkSid,
+          phoneNumberCount: phoneNumbersToRelease.length,
+          phoneNumbers: phoneNumbersToRelease.map(n => n.phoneNumber)
+        });
+      } catch (listError) {
+        if (listError.code === 20404) {
+          Logger.info('Trunk not found in Twilio (may have been deleted already)', {
+            subaccountId,
+            trunkSid
+          });
+          
+          // Still clean up database metadata
+          await connection.db.collection('connectorsubaccount').updateOne(
+            { subaccountId, connectorType: 'twilio' },
+            { $unset: { 'metadata.retellIntegration.trunkSid': '' } }
+          );
+
+          return {
+            success: true,
+            skipped: true,
+            reason: 'Trunk not found in Twilio (already deleted)',
+            trunkSid,
+            trunkDeleted: false,
+            metadataCleared: true,
+            phoneNumbersToRelease: []
+          };
+        }
+        
+        Logger.warn('Failed to list phone numbers from trunk, continuing with deletion', {
+          subaccountId,
+          trunkSid,
+          error: listError.message
+        });
+      }
+
+      // STEP 2: Delete the trunk from Twilio (even if it has phone numbers)
+      try {
+        await client.trunking.v1.trunks(trunkSid).remove();
+        
+        Logger.info('Trunk deleted successfully from Twilio', {
+          subaccountId,
+          trunkSid,
+          phoneNumbersRecorded: phoneNumbersToRelease.length
+        });
+      } catch (deleteError) {
+        if (deleteError.code === 20404) {
+          Logger.info('Trunk not found in Twilio (may have been deleted already)', {
+            subaccountId,
+            trunkSid
+          });
+        } else {
+          Logger.error('Failed to delete trunk from Twilio', {
+            subaccountId,
+            trunkSid,
+            error: deleteError.message,
+            errorCode: deleteError.code
+          });
+          
+          return {
+            success: false,
+            error: deleteError.message,
+            errorCode: deleteError.code,
+            trunkSid,
+            trunkDeleted: false,
+            phoneNumbersToRelease
+          };
+        }
+      }
+
+      // STEP 3: Clear trunk metadata from database
+      try {
+        await connection.db.collection('connectorsubaccount').updateOne(
+          { subaccountId, connectorType: 'twilio' },
+          { $unset: { 'metadata.retellIntegration.trunkSid': '' } }
+        );
+        
+        Logger.info('Trunk metadata cleared from database', {
+          subaccountId,
+          trunkSid
+        });
+      } catch (dbError) {
+        Logger.warn('Failed to clear trunk metadata from database', {
+          subaccountId,
+          trunkSid,
+          error: dbError.message
+        });
+      }
+
+      return {
+        success: true,
+        trunkSid,
+        trunkDeleted: true,
+        metadataCleared: true,
+        phoneNumbersToRelease
+      };
+
+    } catch (error) {
+      Logger.error('Failed to delete trunk for subaccount', {
+        subaccountId,
+        userId,
+        error: error.message,
+        stack: error.stack
+      });
+      
+      return {
+        success: false,
+        error: error.message,
+        trunkDeleted: false,
+        phoneNumbersToRelease: []
+      };
+    }
+  }
+
+  /**
+   * Release phone numbers from Twilio
+   * This is called after trunk deletion to clean up the phone numbers
+   * @param {string} subaccountId - The subaccount ID
+   * @param {Array} phoneNumbersToRelease - Array of phone numbers with {phoneNumber, sid}
+   * @returns {Promise<Object>} - Release results
+   */
+  async releasePhoneNumbersFromTwilio(subaccountId, phoneNumbersToRelease) {
+    const phoneNumbersReleased = [];
+    const phoneNumbersFailed = [];
+
+    if (!phoneNumbersToRelease || phoneNumbersToRelease.length === 0) {
+      Logger.info('No phone numbers to release from Twilio', {
+        subaccountId
+      });
+      return {
+        success: true,
+        phoneNumbersReleased: [],
+        phoneNumbersFailed: []
+      };
+    }
+
+    try {
+      // Get Twilio client
+      const client = await this.getTwilioClient(subaccountId);
+
+      Logger.info('Starting phone number release from Twilio', {
+        subaccountId,
+        phoneNumberCount: phoneNumbersToRelease.length,
+        phoneNumbers: phoneNumbersToRelease.map(n => n.phoneNumber)
+      });
+
+      // Release each phone number
+      for (const phoneNumberInfo of phoneNumbersToRelease) {
+        try {
+          const phoneNumber = phoneNumberInfo.phoneNumber;
+          
+          Logger.info('Releasing phone number from Twilio', {
+            subaccountId,
+            phoneNumber
+          });
+
+          // Get the IncomingPhoneNumber resource SID
+          const incomingNumbers = await client.incomingPhoneNumbers.list({
+            phoneNumber
+          });
+
+          if (incomingNumbers.length > 0) {
+            const phoneNumberSid = incomingNumbers[0].sid;
+            
+            // Remove emergency address if present (required before deletion)
+            try {
+              await client.incomingPhoneNumbers(phoneNumberSid).update({
+                emergencyAddressSid: ''
+              });
+            } catch (addressError) {
+              Logger.debug('Emergency address removal skipped', {
+                phoneNumber,
+                error: addressError.message
+              });
+            }
+            
+            // Delete the phone number
+            await client.incomingPhoneNumbers(phoneNumberSid).remove();
+            
+            phoneNumbersReleased.push(phoneNumber);
+            
+            Logger.info('Phone number released from Twilio', {
+              subaccountId,
+              phoneNumber,
+              phoneNumberSid
+            });
+          } else {
+            Logger.warn('Phone number not found in incoming numbers', {
+              subaccountId,
+              phoneNumber
+            });
+            phoneNumbersFailed.push({
+              phoneNumber,
+              reason: 'Not found in incoming numbers'
+            });
+          }
+        } catch (releaseError) {
+          Logger.error('Failed to release phone number from Twilio', {
+            subaccountId,
+            phoneNumber: phoneNumberInfo.phoneNumber,
+            error: releaseError.message
+          });
+          phoneNumbersFailed.push({
+            phoneNumber: phoneNumberInfo.phoneNumber,
+            error: releaseError.message
+          });
+          // Continue with other phone numbers even if one fails
+        }
+      }
+
+      Logger.info('Finished releasing phone numbers from Twilio', {
+        subaccountId,
+        totalPhoneNumbers: phoneNumbersToRelease.length,
+        phoneNumbersReleased: phoneNumbersReleased.length,
+        phoneNumbersFailed: phoneNumbersFailed.length,
+        releasedNumbers: phoneNumbersReleased
+      });
+
+      return {
+        success: true,
+        phoneNumbersReleased,
+        phoneNumbersFailed
+      };
+
+    } catch (error) {
+      Logger.error('Failed to release phone numbers from Twilio', {
+        subaccountId,
+        error: error.message,
+        stack: error.stack
+      });
+      
+      return {
+        success: false,
+        error: error.message,
+        phoneNumbersReleased,
+        phoneNumbersFailed
+      };
+    }
+  }
 }
 
 // Singleton instance

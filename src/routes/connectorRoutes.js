@@ -226,5 +226,19 @@ router.delete('/:subaccountId/twilio/cache',
   ConnectorController.invalidateTwilioCache
 );
 
+// DELETE /api/connectors/:subaccountId/twilio-trunk - Delete Twilio trunk (service-to-service)
+router.delete('/:subaccountId/twilio-trunk',
+  validateSubaccountId,
+  authenticateServiceToken,
+  ConnectorController.deleteTwilioTrunk
+);
+
+// POST /api/connectors/:subaccountId/twilio/release-phone-numbers - Release phone numbers from Twilio (service-to-service)
+router.post('/:subaccountId/twilio/release-phone-numbers',
+  validateSubaccountId,
+  authenticateServiceToken,
+  ConnectorController.releasePhoneNumbersFromTwilio
+);
+
 module.exports = router;
 
