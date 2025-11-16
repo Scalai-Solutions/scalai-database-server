@@ -1484,6 +1484,49 @@ class ConnectorController {
   }
 
   /**
+   * Fix Retell phone numbers that are missing SIP authentication credentials
+   */
+  async fixRetellNumberCredentials(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { phoneNumber } = req.body; // Optional: fix specific number or all
+
+      Logger.info('Fixing Retell number credentials', {
+        subaccountId,
+        phoneNumber: phoneNumber || 'all numbers',
+        requestId: req.requestId
+      });
+
+      const result = await twilioService.fixRetellNumberCredentials(subaccountId, phoneNumber);
+
+      Logger.info('Retell credentials fix completed', {
+        subaccountId,
+        successCount: result.successCount,
+        failCount: result.failCount
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Fixed credentials for ${result.successCount} of ${result.total} phone numbers`,
+        data: result
+      });
+
+    } catch (error) {
+      Logger.error('Failed to fix Retell credentials', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId: req.params.subaccountId
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fix Retell credentials',
+        code: 'RETELL_FIX_ERROR'
+      });
+    }
+  }
+
+  /**
    * Get purchased Twilio phone numbers (excluding trunk-linked ones)
    */
   async getTwilioPhoneNumbers(req, res) {
@@ -1788,22 +1831,34 @@ class ConnectorController {
 
       const result = await twilioService.purchasePhoneNumber(subaccountId, phoneNumber);
 
+      // Check if we purchased a different number (due to retry logic)
+      const purchasedNumber = result.twilioNumber.phoneNumber;
+      const wasAlternativeNumber = purchasedNumber !== phoneNumber;
+
       Logger.info('Phone number purchased and integrated successfully', {
         subaccountId,
-        phoneNumber,
+        requestedNumber: phoneNumber,
+        purchasedNumber,
+        wasAlternativeNumber,
         sid: result.twilioNumber.sid,
         retellImported: result.retellNumber?.phone_number ? true : false
       });
 
       // Log activity
+      const description = wasAlternativeNumber 
+        ? `Phone number purchased (alternative): ${purchasedNumber} (requested: ${phoneNumber} was unavailable)`
+        : `Twilio phone number purchased and integrated: ${purchasedNumber}`;
+
       await ActivityService.logActivity({
         subaccountId,
         activityType: ACTIVITY_TYPES.CONNECTOR_UPDATED,
         category: ACTIVITY_CATEGORIES.CONNECTOR,
         userId: req.user?.id || 'system',
-        description: `Twilio phone number purchased and integrated: ${phoneNumber}`,
+        description,
         metadata: {
-          phoneNumber,
+          requestedNumber: phoneNumber,
+          purchasedNumber,
+          wasAlternativeNumber,
           sid: result.twilioNumber.sid,
           friendlyName: result.twilioNumber.friendlyName,
           emergencyAddressIntegrated: true,
@@ -1811,14 +1866,23 @@ class ConnectorController {
           retellImported: result.retellNumber?.phone_number ? true : false
         },
         resourceId: result.twilioNumber.sid,
-        resourceName: phoneNumber,
+        resourceName: purchasedNumber,
         operationId: req.requestId
       });
 
+      const responseMessage = wasAlternativeNumber
+        ? `Original number was unavailable. Successfully purchased alternative number: ${purchasedNumber}`
+        : 'Phone number purchased and integrated successfully';
+
       return res.status(201).json({
         success: true,
-        message: 'Phone number purchased and integrated successfully',
-        data: result
+        message: responseMessage,
+        data: result,
+        info: wasAlternativeNumber ? {
+          requestedNumber: phoneNumber,
+          purchasedNumber,
+          note: 'The requested number was no longer available, so an alternative was purchased automatically'
+        } : null
       });
 
     } catch (error) {

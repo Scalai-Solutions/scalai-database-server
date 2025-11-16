@@ -154,6 +154,14 @@ router.post('/:subaccountId/twilio/setup/:emergencyAddressId',
   ConnectorController.setupTwilioForRetell
 );
 
+// POST /api/connectors/:subaccountId/twilio/fix-retell-credentials - Fix Retell SIP credentials
+router.post('/:subaccountId/twilio/fix-retell-credentials',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(10, 60000),
+  ConnectorController.fixRetellNumberCredentials
+);
+
 // GET /api/connectors/:subaccountId/twilio/phoneNumbers - Get purchased phone numbers
 router.get('/:subaccountId/twilio/phoneNumbers',
   validateSubaccountId,

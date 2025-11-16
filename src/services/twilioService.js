@@ -604,43 +604,178 @@ class TwilioService {
 
   /**
    * Fetch or create a SIP trunk for Retell integration
+   * Each subaccount gets its own trunk for full isolation
    */
   async fetchOrCreateTrunk(subaccountId) {
     try {
       const client = await this.getTwilioClient(subaccountId);
       
-      Logger.info('Fetching existing trunks', { subaccountId });
+      Logger.info('Fetching existing trunks for subaccount', { subaccountId });
       
       // Fetch all trunks
       const trunks = await client.trunking.v1.trunks.list();
       
-      // Look for a trunk with friendly_name starting with "scalai_"
-      const scalaiTrunk = trunks.find(trunk => trunk.friendlyName.startsWith('scalai'));
+      // Generate subaccount-specific trunk prefix for isolation
+      const subaccountPrefix = `scalai_${subaccountId.slice(0, 8)}`;
+      
+      // First, check database for stored trunk mapping (most reliable)
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+      const { connection } = connectionInfo;
+      
+      const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
+        subaccountId,
+        connectorType: 'twilio'
+      });
+      
+      const storedTrunkSid = twilioConnector?.metadata?.retellIntegration?.trunkSid;
+      
+      let scalaiTrunk = null;
+      
+      // If we have a stored trunk SID, try to find it by SID (most accurate)
+      if (storedTrunkSid) {
+        scalaiTrunk = trunks.find(trunk => trunk.sid === storedTrunkSid);
+        
+        if (scalaiTrunk) {
+          Logger.info('Found trunk by stored SID from database', {
+            subaccountId,
+            trunkSid: storedTrunkSid,
+            friendlyName: scalaiTrunk.friendlyName
+          });
+        } else {
+          Logger.warn('Stored trunk SID not found in Twilio - trunk may have been deleted', {
+            subaccountId,
+            storedTrunkSid
+          });
+        }
+      }
+      
+      // If not found by SID, search by subaccount-specific prefix
+      if (!scalaiTrunk) {
+        scalaiTrunk = trunks.find(trunk => 
+          trunk.friendlyName.startsWith(subaccountPrefix)
+        );
+        
+        if (scalaiTrunk) {
+          Logger.info('Found trunk by subaccount prefix', {
+            subaccountId,
+            subaccountPrefix,
+            trunkSid: scalaiTrunk.sid,
+            friendlyName: scalaiTrunk.friendlyName
+          });
+        }
+      }
+      
+      // Backward compatibility: If still not found, check for old naming scheme (no subaccount ID)
+      // But ONLY if this is the only "scalai" trunk (to avoid conflicts)
+      if (!scalaiTrunk) {
+        const oldStyleTrunks = trunks.filter(trunk => 
+          trunk.friendlyName.startsWith('scalai') && 
+          !trunk.friendlyName.match(/^scalai_[a-f0-9]{8}_/)
+        );
+        
+        if (oldStyleTrunks.length === 1) {
+          scalaiTrunk = oldStyleTrunks[0];
+          Logger.warn('Found old-style trunk (no subaccount isolation) - consider migrating', {
+            subaccountId,
+            trunkSid: scalaiTrunk.sid,
+            friendlyName: scalaiTrunk.friendlyName,
+            migration: 'This trunk was created before subaccount isolation was implemented'
+          });
+        } else if (oldStyleTrunks.length > 1) {
+          Logger.error('Multiple old-style trunks found - cannot determine which belongs to this subaccount', {
+            subaccountId,
+            oldStyleTrunkCount: oldStyleTrunks.length,
+            oldStyleTrunks: oldStyleTrunks.map(t => ({ sid: t.sid, name: t.friendlyName }))
+          });
+        }
+      }
+      
+      Logger.debug('Trunk search result', {
+        subaccountId,
+        subaccountPrefix,
+        totalTrunks: trunks.length,
+        foundSubaccountTrunk: !!scalaiTrunk,
+        trunkSid: scalaiTrunk?.sid,
+        trunkName: scalaiTrunk?.friendlyName
+      });
       
       if (scalaiTrunk) {
-        Logger.info('Found existing ScalAI trunk, fetching stored credentials', { 
+        Logger.info('Found existing ScalAI trunk - using existing credentials', { 
           subaccountId, 
           trunkSid: scalaiTrunk.sid,
           friendlyName: scalaiTrunk.friendlyName 
         });
 
-        // Get stored credentials from database metadata
+        // Get trunk's credential list from Twilio (don't recreate!)
+        const credentialLists = await client.trunking.v1
+          .trunks(scalaiTrunk.sid)
+          .credentialLists
+          .list();
+        
+        if (credentialLists.length === 0) {
+          throw new Error('Trunk has no credential list. Please run Twilio setup again to create credentials.');
+        }
+        
+        const credentialListSid = credentialLists[0].sid;
+        Logger.debug('Found credential list for trunk', { 
+          subaccountId, 
+          credentialListSid 
+        });
+        
+        // Get credentials from the credential list
+        const credentials = await client.sip.credentialLists(credentialListSid)
+          .credentials
+          .list();
+        
+        if (credentials.length === 0) {
+          throw new Error('Credential list has no credentials. Please run Twilio setup again.');
+        }
+        
+        const existingCredential = credentials[0];
+        const username = existingCredential.username;
+        
+        Logger.info('Using existing credential from Twilio', {
+          subaccountId,
+          username,
+          credentialSid: existingCredential.sid
+        });
+        
+        // The password is always '44pass$$scalAI' (we set this when creating)
+        // Store it encrypted in the database
+        const encryptionService = require('./encryptionService');
+        const password = '44pass$$scalAI';
+        const encryptedPassword = encryptionService.encryptField(password, 'twilio');
+        
+        // Get database connection to store encrypted credentials
         const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
         const { connection } = connectionInfo;
         
-        const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
-          subaccountId,
-          connectorType: 'twilio'
-        });
-
-        const storedCredentials = twilioConnector?.metadata?.retellIntegration?.sipCredentials;
+        // Store encrypted password AND trunk SID in database for future lookups
+        await connection.db.collection('connectorsubaccount').updateOne(
+          {
+            subaccountId,
+            connectorType: 'twilio'
+          },
+          {
+            $set: {
+              'metadata.retellIntegration.trunkSid': scalaiTrunk.sid,
+              'metadata.retellIntegration.trunkFriendlyName': scalaiTrunk.friendlyName,
+              'metadata.retellIntegration.sipCredentials': {
+                username: username,
+                password: encryptedPassword.encrypted,
+                passwordIV: encryptedPassword.iv,
+                passwordAuthTag: encryptedPassword.authTag
+              },
+              updatedAt: new Date()
+            }
+          }
+        );
         
-        Logger.debug('Stored credentials from database', {
+        Logger.info('Encrypted credentials and trunk mapping stored in database', {
           subaccountId,
-          hasStoredCredentials: !!storedCredentials,
-          storedUsername: storedCredentials?.username,
-          hasStoredPassword: !!storedCredentials?.password,
-          passwordLength: storedCredentials?.password ? storedCredentials.password.length : 0
+          trunkSid: scalaiTrunk.sid,
+          username,
+          encrypted: true
         });
         
         // Fetch termination config
@@ -649,7 +784,10 @@ class TwilioService {
         return {
           ...scalaiTrunk,
           terminationConfig,
-          credentials: storedCredentials || { username: 'scalai_user', password: null }
+          credentials: {
+            username: username,
+            password: password  // Return plain password for use (not encrypted)
+          }
         };
       }
 
@@ -667,22 +805,34 @@ class TwilioService {
 
   /**
    * Create a new SIP trunk for Retell integration
+   * Trunk name includes subaccount ID for full isolation
    */
   async createTrunk(subaccountId) {
     let trunk;
     try {
       const client = await this.getTwilioClient(subaccountId);
       
+      // Generate subaccount-specific trunk name for isolation
+      // Format: scalai_{first_8_chars_of_subaccount}_{random}
+      const subaccountPrefix = subaccountId.slice(0, 8);
+      const randomSuffix = Math.random().toString(36).substr(2, 6);
+      const friendlyName = `scalai_${subaccountPrefix}_${randomSuffix}`;
       
-      const friendlyName = `scalai${Math.random().toString(36).substr(2, 8)}`;
+      // Domain name should be valid (no underscores)
+      const domainName = `scalai${subaccountPrefix}${randomSuffix}.pstn.twilio.com`;
       
-      Logger.info('Creating new SIP trunk', { subaccountId, friendlyName });
+      Logger.info('Creating new SIP trunk with subaccount isolation', { 
+        subaccountId, 
+        friendlyName,
+        domainName,
+        subaccountPrefix
+      });
       
       // Create the trunk
       trunk = await client.trunking.v1.trunks.create({
         friendlyName,
         transferMode: 'enable-all',
-        domainName: `${friendlyName}.pstn.twilio.com`,
+        domainName,
         cnamLookupEnabled: false,
         transferCallerId: 'from-transferee'
       });
@@ -695,7 +845,8 @@ class TwilioService {
 
       try {
         // Fetch or create credential list first (force recreate to get password)
-        const credentialResult = await this.fetchOrCreateCredentialList(subaccountId, true);
+        // Pass trunk friendly name so username matches the trunk (NOT hardcoded!)
+        const credentialResult = await this.fetchOrCreateCredentialList(subaccountId, true, trunk.friendlyName);
 
         // Integrate trunk with credential list
         await this.integrateTrunkWithCredentialList(subaccountId, trunk.sid, credentialResult.credentialList.sid);
@@ -850,11 +1001,11 @@ class TwilioService {
    * Fetch or create credential list for SIP authentication
    * Always recreates the credential to ensure we have the password
    */
-  async fetchOrCreateCredentialList(subaccountId, forceRecreate = false) {
+  async fetchOrCreateCredentialList(subaccountId, forceRecreate = false, trunkFriendlyName = null) {
     try {
       const client = await this.getTwilioClient(subaccountId);
       
-      Logger.info('Fetching credential lists', { subaccountId, forceRecreate });
+      Logger.info('Fetching credential lists', { subaccountId, forceRecreate, trunkFriendlyName });
       
       // Fetch all credential lists
       const credentialLists = await client.sip.credentialLists.list();
@@ -870,29 +1021,34 @@ class TwilioService {
           credentialListSid: scalaiCredentialList.sid 
         });
         
-        // Check if it has the scalai_user credential
+        // Get ALL credentials from the list (don't search for hardcoded username!)
         const credentials = await client.sip.credentialLists(scalaiCredentialList.sid)
           .credentials
           .list();
         
-        const scalaiCredential = credentials.find(cred => 
-          cred.username === 'scalai_user'
-        );
+        // Use the FIRST credential if any exist (don't assume username)
+        const existingCredential = credentials.length > 0 ? credentials[0] : null;
 
-        if (scalaiCredential) {
+        if (existingCredential) {
           // If we need a new password (forceRecreate), delete and recreate the credential
           if (forceRecreate) {
+            const existingUsername = existingCredential.username;
+            
             Logger.info('Deleting existing credential to create new one with known password', {
               subaccountId,
-              credentialListSid: scalaiCredentialList.sid
+              credentialListSid: scalaiCredentialList.sid,
+              existingUsername
             });
             
             try {
               await client.sip.credentialLists(scalaiCredentialList.sid)
-                .credentials(scalaiCredential.sid)
+                .credentials(existingCredential.sid)
                 .remove();
               
-              Logger.info('Existing credential deleted', { subaccountId });
+              Logger.info('Existing credential deleted', { 
+                subaccountId,
+                username: existingUsername 
+              });
             } catch (deleteError) {
               Logger.warn('Failed to delete existing credential, will create new one anyway', {
                 subaccountId,
@@ -900,8 +1056,23 @@ class TwilioService {
               });
             }
             
-            // Create new credential with known password
-            const newCredential = await this.createCredential(subaccountId, scalaiCredentialList.sid);
+            // CRITICAL: Recreate with the SAME username (not a new one!)
+            // Use existing username if we have it, otherwise generate from trunk name
+            const usernameForRecreate = existingUsername || trunkFriendlyName;
+            
+            Logger.info('Recreating credential with existing username', {
+              subaccountId,
+              username: usernameForRecreate,
+              preservingExisting: !!existingUsername
+            });
+            
+            const newCredential = await this.createCredential(
+              subaccountId, 
+              scalaiCredentialList.sid, 
+              usernameForRecreate,
+              true  // preserveUsername flag
+            );
+            
             return {
               credentialList: scalaiCredentialList,
               credential: newCredential
@@ -911,19 +1082,19 @@ class TwilioService {
           // Return existing credential with fixed password (since Twilio doesn't return it)
           Logger.info('Existing credential found, using fixed password', { 
             subaccountId,
-            username: scalaiCredential.username 
+            username: existingCredential.username 
           });
           return {
             credentialList: scalaiCredentialList,
             credential: {
-              ...scalaiCredential,
+              ...existingCredential,
               password: '44pass$$scalAI' // Use fixed password for existing credentials
             }
           };
         }
 
         // If no credential found, create one
-        const credential = await this.createCredential(subaccountId, scalaiCredentialList.sid);
+        const credential = await this.createCredential(subaccountId, scalaiCredentialList.sid, trunkFriendlyName);
         return {
           credentialList: scalaiCredentialList,
           credential
@@ -931,8 +1102,8 @@ class TwilioService {
       }
 
       // If no credential list found, create new one with credential
-      Logger.info('Creating new credential list', { subaccountId });
-      return await this.createCredentialList(subaccountId);
+      Logger.info('Creating new credential list', { subaccountId, trunkFriendlyName });
+      return await this.createCredentialList(subaccountId, trunkFriendlyName);
     } catch (error) {
       Logger.error('Failed to fetch or create credential list', {
         subaccountId,
@@ -945,7 +1116,7 @@ class TwilioService {
   /**
    * Create a new credential list
    */
-  async createCredentialList(subaccountId) {
+  async createCredentialList(subaccountId, trunkFriendlyName = null) {
     try {
       const client = await this.getTwilioClient(subaccountId);
       
@@ -953,19 +1124,20 @@ class TwilioService {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const friendlyName = `scalai_cl_${timestamp}`;
       
-      Logger.info('Creating credential list', { subaccountId, friendlyName });
+      Logger.info('Creating credential list', { subaccountId, friendlyName, trunkFriendlyName });
       
       // Create a new credential list
       const credentialList = await client.sip.credentialLists.create({
         friendlyName
       });
 
-      // Create credential in the list
-      const credential = await this.createCredential(subaccountId, credentialList.sid);
+      // Create credential in the list with dynamic username based on trunk
+      const credential = await this.createCredential(subaccountId, credentialList.sid, trunkFriendlyName);
 
       Logger.info('Credential list created successfully', { 
         subaccountId, 
-        credentialListSid: credentialList.sid 
+        credentialListSid: credentialList.sid,
+        username: credential.username
       });
 
       return {
@@ -983,16 +1155,39 @@ class TwilioService {
 
   /**
    * Create a credential in a credential list
+   * Username is dynamically generated based on trunk, NOT hardcoded
    */
-  async createCredential(subaccountId, credentialListSid) {
+  async createCredential(subaccountId, credentialListSid, trunkFriendlyName = null, preserveUsername = false) {
     try {
       const client = await this.getTwilioClient(subaccountId);
       
-      Logger.info('Creating credential', { subaccountId, credentialListSid });
+      Logger.info('Creating credential', { subaccountId, credentialListSid, trunkFriendlyName, preserveUsername });
       
       // Use fixed password for consistency
       const password = '44pass$$scalAI';
-      const username = 'scalai_user';
+      
+      let username;
+      
+      // If preserveUsername is true, use the trunkFriendlyName AS-IS (it's the existing username)
+      if (preserveUsername && trunkFriendlyName) {
+        username = trunkFriendlyName;  // This is actually the existing username!
+        Logger.info('Preserving existing username', {
+          subaccountId,
+          username
+        });
+      } else {
+        // Generate username based on trunk name (NOT hardcoded!)
+        // Use trunk friendly name if provided, otherwise use subaccount ID
+        username = trunkFriendlyName 
+          ? `${trunkFriendlyName.replace(/[^a-zA-Z0-9]/g, '_')}_user`
+          : `scalai_${subaccountId.slice(0, 8)}_user`;
+        
+        Logger.info('Creating SIP credential with dynamic username', {
+          subaccountId,
+          username,
+          source: trunkFriendlyName ? 'trunk_name' : 'subaccount_id'
+        });
+      }
       
       const credential = await client.sip.credentialLists(credentialListSid)
         .credentials
@@ -1538,7 +1733,43 @@ class TwilioService {
       const bundleSid = twilioConnector.metadata?.retellIntegration?.bundleSid;
       const trunkSid = twilioConnector.metadata?.retellIntegration?.trunkSid;
       const terminationSipUri = twilioConnector.metadata?.retellIntegration?.terminationSipUri;
-      const sipCredentials = twilioConnector.metadata?.retellIntegration?.sipCredentials;
+      
+      // Get decrypted SIP credentials from database
+      let sipCredentials = await this.getDecryptedSipCredentials(subaccountId);
+
+      // If credentials are missing or incomplete, fetch from trunk (DON'T recreate!)
+      if (!sipCredentials || !sipCredentials.username || !sipCredentials.password) {
+        Logger.warn('SIP credentials missing or incomplete, fetching from existing Twilio trunk', {
+          subaccountId,
+          hasCredentials: !!sipCredentials,
+          hasUsername: !!sipCredentials?.username,
+          hasPassword: !!sipCredentials?.password
+        });
+
+        try {
+          // Fetch existing trunk which will read credentials from Twilio and store encrypted
+          const trunkResult = await this.fetchOrCreateTrunk(subaccountId);
+          sipCredentials = trunkResult.credentials;
+
+          Logger.info('Retrieved credentials from existing trunk', {
+            subaccountId,
+            username: sipCredentials.username,
+            hasPassword: !!sipCredentials.password
+          });
+        } catch (credError) {
+          Logger.error('Failed to fetch credentials from trunk', {
+            subaccountId,
+            error: credError.message
+          });
+          throw new Error(`Cannot purchase number: SIP credentials unavailable. Please run Twilio setup first.`);
+        }
+      } else {
+        Logger.debug('Valid SIP credentials retrieved and decrypted', {
+          subaccountId,
+          username: sipCredentials.username,
+          hasPassword: !!sipCredentials.password
+        });
+      }
 
       // Determine country code from phone number to check if bundle is required
       const phoneNumberStr = phoneNumber.replace(/[^0-9+]/g, '');
@@ -1570,12 +1801,29 @@ class TwilioService {
         throw new Error('SIP trunk not configured. Please run Twilio setup first.');
       }
 
-      // Determine number type by checking available numbers
-      // This helps validate bundle type compatibility
+      // Determine number type - CRITICAL for bundle validation and retry logic
+      // First, try to detect from phone number pattern
       let numberType = null;
-      if (requiresBundle && bundleSid) {
+      const phoneStr = phoneNumber.replace(/[^0-9+]/g, '');
+      
+      // Detect number type from pattern (UK numbers as example)
+      if (countryCode === 'GB') {
+        if (phoneStr.startsWith('+447') && phoneStr.length === 13) {
+          numberType = 'mobile';
+          Logger.debug('Detected mobile number from pattern', { phoneNumber, numberType });
+        } else if (phoneStr.startsWith('+441') || phoneStr.startsWith('+4420')) {
+          numberType = 'local';
+          Logger.debug('Detected local number from pattern', { phoneNumber, numberType });
+        } else if (phoneStr.startsWith('+448')) {
+          numberType = 'tollFree';
+          Logger.debug('Detected toll-free number from pattern', { phoneNumber, numberType });
+        }
+      }
+      
+      // If we couldn't detect from pattern and bundle is required, try searching
+      if (!numberType && requiresBundle && bundleSid) {
         try {
-          Logger.debug('Checking number type for bundle validation', { phoneNumber, countryCode });
+          Logger.debug('Checking number type from available numbers', { phoneNumber, countryCode });
           
           // Try to find the number in available numbers to determine its type
           const searchResults = await this.searchAvailablePhoneNumbers(subaccountId, {
@@ -1590,17 +1838,26 @@ class TwilioService {
           
           if (foundNumber) {
             numberType = foundNumber.numberType; // 'local', 'mobile', or 'tollFree'
-            Logger.debug('Number type determined', { phoneNumber, numberType });
+            Logger.debug('Number type determined from search', { phoneNumber, numberType });
           } else {
             Logger.warn('Could not determine number type from available numbers', { phoneNumber });
           }
         } catch (error) {
-          Logger.warn('Failed to determine number type, proceeding anyway', { 
+          Logger.warn('Failed to determine number type from search', { 
             phoneNumber, 
             error: error.message 
           });
         }
       }
+      
+      // Store the original number type for retry logic - MUST match bundle type!
+      const originalNumberType = numberType;
+      Logger.info('Number type for purchase', { 
+        phoneNumber, 
+        numberType, 
+        countryCode,
+        requiresBundle 
+      });
 
       // Generate friendly name
       const friendlyName = `voone_${phoneNumber.replace(/\+/g, '')}`;
@@ -1652,11 +1909,111 @@ class TwilioService {
       }
 
       let purchasedNumber;
-      try {
-        purchasedNumber = await client.incomingPhoneNumbers.create(purchaseParams);
-      } catch (purchaseError) {
-        // Check if error is related to bundle type mismatch
-        if (purchaseError.message && purchaseError.message.includes('does not have the correct regulation type')) {
+      let retryAttempt = 0;
+      const maxRetries = 3;
+
+      while (retryAttempt <= maxRetries) {
+        try {
+          purchasedNumber = await client.incomingPhoneNumbers.create(purchaseParams);
+          break; // Success! Exit the retry loop
+        } catch (purchaseError) {
+          // Check if the number is no longer available
+          if (purchaseError.message && purchaseError.message.includes('is not available') && retryAttempt < maxRetries) {
+            Logger.warn('Phone number no longer available, attempting to find alternative', {
+              phoneNumber,
+              attempt: retryAttempt + 1,
+              maxRetries,
+              countryCode
+            });
+
+            try {
+              // CRITICAL: Search for numbers of the SAME TYPE as the original to avoid bundle mismatches
+              const searchType = originalNumberType || 'all';
+              
+              if (!originalNumberType) {
+                Logger.warn('Original number type unknown - searching all types may cause bundle issues', {
+                  phoneNumber,
+                  countryCode
+                });
+              }
+              
+              Logger.info('Searching for alternative number of same type', {
+                originalNumber: phoneNumber,
+                searchType,
+                countryCode,
+                requiresBundle
+              });
+              
+              // Search for a new available number with the SAME TYPE as the original
+              const searchResults = await this.searchAvailablePhoneNumbers(subaccountId, {
+                countryCode,
+                limit: 10,
+                type: searchType
+              });
+
+              if (searchResults.availableNumbers && searchResults.availableNumbers.length > 0) {
+                // Get the first available number of the same type
+                const alternativeNumber = searchResults.availableNumbers[0];
+                const newPhoneNumber = alternativeNumber.phoneNumber;
+                const newNumberType = alternativeNumber.numberType;
+
+                // Verify the new number type matches the original (critical for bundle validation)
+                if (originalNumberType && newNumberType !== originalNumberType) {
+                  Logger.error('Alternative number type mismatch', {
+                    originalNumber: phoneNumber,
+                    originalType: originalNumberType,
+                    alternativeNumber: newPhoneNumber,
+                    alternativeType: newNumberType,
+                    bundleSid
+                  });
+                  throw new Error(`${phoneNumber} is no longer available. Alternative numbers found are of different type (${newNumberType} vs ${originalNumberType}) and won't match your bundle. Please search for ${originalNumberType} numbers specifically.`);
+                }
+
+                Logger.info('Found alternative phone number of same type, retrying purchase', {
+                  originalNumber: phoneNumber,
+                  newNumber: newPhoneNumber,
+                  numberType: newNumberType,
+                  originalType: originalNumberType,
+                  bundleCompatible: true,
+                  attempt: retryAttempt + 1
+                });
+
+                // Update purchase params with the new number
+                purchaseParams.phoneNumber = newPhoneNumber;
+                purchaseParams.friendlyName = `voone_${newPhoneNumber.replace(/\+/g, '')}`;
+                
+                // Update local variables for the rest of the flow
+                phoneNumber = newPhoneNumber;
+                numberType = newNumberType;
+
+                retryAttempt++;
+                continue; // Retry with the new number
+              } else {
+                const typeMsg = originalNumberType ? ` of type "${originalNumberType}"` : '';
+                Logger.error('No alternative numbers available', { 
+                  countryCode, 
+                  numberType: originalNumberType,
+                  searchType 
+                });
+                throw new Error(`${phoneNumber} is no longer available and no alternative ${countryCode} numbers${typeMsg} found. Please try again.`);
+              }
+            } catch (searchError) {
+              Logger.error('Failed to search for alternative number', {
+                error: searchError.message,
+                originalNumber: phoneNumber,
+                originalType: originalNumberType
+              });
+              // Re-throw as-is if it's our custom error about type mismatch
+              if (searchError.message.includes('won\'t match your bundle') || 
+                  searchError.message.includes('no alternative')) {
+                throw searchError;
+              }
+              throw new Error(`${phoneNumber} is no longer available and failed to find alternatives: ${searchError.message}`);
+            }
+          }
+          
+          // Check if error is related to bundle type mismatch
+          if (purchaseError.message && purchaseError.message.includes('does not have the correct regulation type')) {
           // Try to determine number type if we didn't get it earlier
           let detectedNumberType = numberType;
           if (!detectedNumberType) {
@@ -1697,6 +2054,11 @@ class TwilioService {
         }
         // Re-throw other errors as-is
         throw purchaseError;
+        }
+      }
+
+      if (!purchasedNumber) {
+        throw new Error('Failed to purchase phone number after multiple attempts');
       }
       
       Logger.info('Phone number purchased', { 
@@ -2171,6 +2533,75 @@ class TwilioService {
   }
 
   /**
+   * Get decrypted SIP credentials from database
+   * Handles both encrypted and plain text passwords for backward compatibility
+   */
+  async getDecryptedSipCredentials(subaccountId) {
+    try {
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+      const { connection } = connectionInfo;
+      
+      const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
+        subaccountId,
+        connectorType: 'twilio'
+      });
+
+      if (!twilioConnector) {
+        return null;
+      }
+
+      const storedCredentials = twilioConnector.metadata?.retellIntegration?.sipCredentials;
+      
+      if (!storedCredentials || !storedCredentials.username) {
+        return null;
+      }
+
+      // Check if password is encrypted
+      const isEncrypted = storedCredentials.passwordIV && storedCredentials.passwordAuthTag;
+      
+      if (isEncrypted) {
+        // Decrypt password
+        const encryptionService = require('./encryptionService');
+        const decryptedPassword = encryptionService.decryptField(
+          storedCredentials.password,
+          storedCredentials.passwordIV,
+          storedCredentials.passwordAuthTag,
+          'twilio'
+        );
+        
+        Logger.debug('Decrypted SIP credentials from database', {
+          subaccountId,
+          username: storedCredentials.username,
+          wasEncrypted: true
+        });
+        
+        return {
+          username: storedCredentials.username,
+          password: decryptedPassword
+        };
+      } else {
+        // Plain text password (backward compatibility)
+        Logger.debug('Retrieved plain text SIP credentials from database', {
+          subaccountId,
+          username: storedCredentials.username,
+          wasEncrypted: false
+        });
+        
+        return {
+          username: storedCredentials.username,
+          password: storedCredentials.password
+        };
+      }
+    } catch (error) {
+      Logger.error('Failed to get decrypted SIP credentials', {
+        subaccountId,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
+  /**
    * Setup Twilio for Retell AI integration
    */
   async setupTwilioForRetell(subaccountId, emergencyAddressId) {
@@ -2197,14 +2628,20 @@ class TwilioService {
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
       const { connection } = connectionInfo;
 
-      Logger.debug('Storing Retell integration metadata', {
+      // Encrypt password before storing
+      const encryptionService = require('./encryptionService');
+      const encryptedPassword = credentials.password 
+        ? encryptionService.encryptField(credentials.password, 'twilio')
+        : null;
+      
+      Logger.debug('Storing Retell integration metadata with encrypted password', {
         subaccountId,
         trunkSid: trunk.sid,
         emergencyAddressId,
         credentialsToStore: {
           username: credentials.username,
           hasPassword: !!credentials.password,
-          passwordLength: credentials.password ? credentials.password.length : 0
+          encrypted: !!encryptedPassword
         }
       });
 
@@ -2222,9 +2659,14 @@ class TwilioService {
               terminationSipUri: primaryTerminationUri,
               localizedTerminationUris,
               originationSipUri: 'sip:sip.retellai.com',
-              sipCredentials: {
+              sipCredentials: encryptedPassword ? {
                 username: credentials.username,
-                password: credentials.password
+                password: encryptedPassword.encrypted,
+                passwordIV: encryptedPassword.iv,
+                passwordAuthTag: encryptedPassword.authTag
+              } : {
+                username: credentials.username,
+                password: null
               },
               emergencyAddressId,
               setupCompletedAt: new Date(),
@@ -2289,6 +2731,161 @@ class TwilioService {
       Logger.error('Failed to setup Twilio for Retell', {
         subaccountId,
         emergencyAddressId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Fix existing Retell numbers that are missing SIP authentication credentials
+   * This updates the phone numbers in Retell with the correct auth username and password
+   */
+  async fixRetellNumberCredentials(subaccountId, phoneNumber = null) {
+    try {
+      Logger.info('Fixing Retell number credentials', { 
+        subaccountId, 
+        phoneNumber: phoneNumber || 'all numbers' 
+      });
+
+      // Get connector info for SIP credentials
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+      const { connection } = connectionInfo;
+      
+      const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
+        subaccountId,
+        connectorType: 'twilio'
+      });
+
+      if (!twilioConnector) {
+        throw new Error('Twilio connector not found for this subaccount');
+      }
+
+      const terminationSipUri = twilioConnector.metadata?.retellIntegration?.terminationSipUri;
+      
+      // Get decrypted SIP credentials
+      const sipCredentials = await this.getDecryptedSipCredentials(subaccountId);
+
+      if (!sipCredentials || !sipCredentials.username || !sipCredentials.password) {
+        throw new Error('SIP credentials not found or incomplete. Please run Twilio setup first.');
+      }
+
+      Logger.info('Found decrypted SIP credentials', {
+        subaccountId,
+        username: sipCredentials.username,
+        hasPassword: !!sipCredentials.password,
+        terminationUri: terminationSipUri
+      });
+
+      // Get Retell API key
+      const retellService = require('./retellService');
+      let retellApiKey;
+      
+      try {
+        const retellAccount = await retellService.getRetellAccount(subaccountId);
+        retellApiKey = retellAccount.apiKey;
+      } catch (retellError) {
+        throw new Error(`Retell account not configured: ${retellError.message}`);
+      }
+
+      // Get all phone numbers or specific number
+      const query = { subaccountId };
+      if (phoneNumber) {
+        query.phone_number = phoneNumber;
+      }
+
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      const phoneNumbers = await phoneNumbersCollection.find(query).toArray();
+
+      if (phoneNumbers.length === 0) {
+        throw new Error(`No phone numbers found for subaccount`);
+      }
+
+      Logger.info('Found phone numbers to fix', {
+        subaccountId,
+        count: phoneNumbers.length,
+        numbers: phoneNumbers.map(n => n.phone_number)
+      });
+
+      const results = [];
+
+      for (const phoneNum of phoneNumbers) {
+        try {
+          Logger.info('Updating credentials in Retell', {
+            phoneNumber: phoneNum.phone_number,
+            username: sipCredentials.username
+          });
+
+          // Update the phone number in Retell with SIP credentials
+          const updatePayload = {
+            sip_trunk_auth_username: sipCredentials.username,
+            sip_trunk_auth_password: sipCredentials.password
+          };
+
+          const response = await axios.patch(
+            `https://api.retellai.com/update-phone-number/${encodeURIComponent(phoneNum.phone_number)}`,
+            updatePayload,
+            {
+              headers: {
+                'Authorization': `Bearer ${retellApiKey}`,
+                'Content-Type': 'application/json'
+              },
+              timeout: 30000
+            }
+          );
+
+          Logger.info('Successfully updated credentials in Retell', {
+            phoneNumber: phoneNum.phone_number,
+            retellResponse: {
+              auth_username: response.data.sip_outbound_trunk_config?.auth_username,
+              termination_uri: response.data.sip_outbound_trunk_config?.termination_uri
+            }
+          });
+
+          results.push({
+            phoneNumber: phoneNum.phone_number,
+            success: true,
+            auth_username: response.data.sip_outbound_trunk_config?.auth_username,
+            message: 'Credentials updated successfully'
+          });
+
+        } catch (updateError) {
+          Logger.error('Failed to update credentials for phone number', {
+            phoneNumber: phoneNum.phone_number,
+            error: updateError.message,
+            response: updateError.response?.data
+          });
+
+          results.push({
+            phoneNumber: phoneNum.phone_number,
+            success: false,
+            error: updateError.message
+          });
+        }
+      }
+
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+
+      Logger.info('Credential fix completed', {
+        subaccountId,
+        total: results.length,
+        success: successCount,
+        failed: failCount
+      });
+
+      return {
+        success: true,
+        total: results.length,
+        successCount,
+        failCount,
+        results
+      };
+
+    } catch (error) {
+      Logger.error('Failed to fix Retell number credentials', {
+        subaccountId,
+        phoneNumber,
         error: error.message
       });
       throw error;

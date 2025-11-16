@@ -24,6 +24,49 @@ class AIInsightsService {
   }
 
   /**
+   * Ensure TTL index exists on ai_insights collection
+   * Automatically deletes insights older than 30 days
+   * @param {Object} connection - MongoDB connection
+   * @returns {Promise<void>}
+   */
+  async ensureTTLIndex(connection) {
+    try {
+      const insightsCollection = connection.db.collection('ai_insights');
+      
+      // Check if TTL index already exists
+      const indexes = await insightsCollection.indexes();
+      const hasTTL = indexes.some(index => 
+        index.key.generatedAt === 1 && index.expireAfterSeconds !== undefined
+      );
+
+      if (!hasTTL) {
+        // Create TTL index: delete documents 30 days after generatedAt
+        await insightsCollection.createIndex(
+          { generatedAt: 1 },
+          { 
+            expireAfterSeconds: 2592000, // 30 days = 30 * 24 * 60 * 60 seconds
+            name: 'generatedAt_ttl_30days'
+          }
+        );
+        
+        Logger.info('TTL index created on ai_insights collection', {
+          field: 'generatedAt',
+          expireAfterSeconds: 2592000,
+          expireAfterDays: 30
+        });
+      } else {
+        Logger.debug('TTL index already exists on ai_insights collection');
+      }
+    } catch (error) {
+      Logger.error('Failed to ensure TTL index on ai_insights', {
+        error: error.message,
+        stack: error.stack
+      });
+      // Don't throw - this is not critical enough to stop the service
+    }
+  }
+
+  /**
    * Check if insights need to be regenerated (older than 24 hours or forced)
    * @param {Object} lastInsight - Last insight document
    * @param {boolean} force - Force regeneration
@@ -64,6 +107,9 @@ class AIInsightsService {
       const { connection } = connectionInfo;
       
       const insightsCollection = connection.db.collection('ai_insights');
+
+      // Ensure TTL index exists for automatic cleanup of old insights
+      await this.ensureTTLIndex(connection);
 
       // Check if we have recent insights
       const lastInsight = await insightsCollection.findOne(
