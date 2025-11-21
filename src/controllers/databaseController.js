@@ -1192,8 +1192,14 @@ After appointment is booked:
         const callsCollection = await storage.getCollection('calls');
         
         // Fetch all calls for this agent
+        // Handle both agent_id and agentId for backward compatibility
         const allAgentCalls = await callsCollection
-          .find({ agent_id: agentId })
+          .find({ 
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ]
+          })
           .toArray();
 
         // Manually calculate stats for both periods
@@ -1295,9 +1301,13 @@ After appointment is booked:
       // Step 2: Use aggregation to calculate statistics for both periods
       const statisticsAggregation = await callsCollection.aggregate([
         // Match calls for this agent in both periods
+        // Handle both agent_id and agentId for backward compatibility
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: previousPeriodStart.getTime()
             }
@@ -1729,9 +1739,13 @@ After appointment is booked:
       // Step 2: Use aggregation to calculate statistics for both periods (including cost and duration)
       const statisticsAggregation = await callsCollection.aggregate([
         // Match calls for this agent in both periods
+        // Handle both agent_id and agentId for backward compatibility
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: previousPeriodStart.getTime()
             }
