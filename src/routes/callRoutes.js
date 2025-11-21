@@ -9,6 +9,7 @@ const { authenticateToken, requestLogger } = require('../middleware/authMiddlewa
 const { authenticateServiceToken } = require('../middleware/serviceAuthMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
+const { attachTimezone, convertResponseDates, convertRequestDates } = require('../middleware/timezoneMiddleware');
 
 // Import validators
 const { 
@@ -32,6 +33,11 @@ router.patch('/:subaccountId/webhook-update',
 router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
+
+// Apply timezone middleware
+router.use(attachTimezone);
+router.use(convertRequestDates);
+router.use(convertResponseDates);
 
 // POST /api/calls/:subaccountId/web-call - Create a web call
 router.post('/:subaccountId/web-call',

@@ -8,6 +8,7 @@ const ChatController = require('../controllers/chatController');
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
+const { attachTimezone, convertResponseDates, convertRequestDates } = require('../middleware/timezoneMiddleware');
 
 // Import validators
 const { 
@@ -23,6 +24,11 @@ const {
 router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
+
+// Apply timezone middleware
+router.use(attachTimezone);
+router.use(convertRequestDates);
+router.use(convertResponseDates);
 
 // POST /api/chats/:subaccountId/create - Create a new chat
 router.post('/:subaccountId/create',

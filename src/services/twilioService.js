@@ -1294,9 +1294,10 @@ class TwilioService {
       // Fetch with full details to get locality and country information
       const phoneNumbers = await client.incomingPhoneNumbers.list({ limit: 1000 });
 
-      // Filter out numbers linked to the trunk
+      // Filter out numbers linked to ANY trunk (only show unassigned numbers)
       const availableNumbers = phoneNumbers.filter(number => {
-        return !trunkSid || number.trunkSid !== trunkSid;
+        // Include only if number is NOT connected to any trunk
+        return !number.trunkSid || number.trunkSid === null || number.trunkSid === '';
       });
 
       // Fetch detailed information for each number to get locality and country code
@@ -1707,6 +1708,225 @@ class TwilioService {
   /**
    * Purchase a phone number with full integration (emergency address, trunk, Retell)
    */
+  /**
+   * Import an existing Twilio phone number and complete all integration steps
+   * (Skip purchase, do trunk registration, Retell import, MongoDB storage)
+   */
+  async importExistingPhoneNumber(subaccountId, phoneNumber) {
+    try {
+      Logger.info('Starting import of existing phone number', { 
+        subaccountId, 
+        phoneNumber 
+      });
+
+      const client = await this.getTwilioClient(subaccountId);
+
+      // Step 1: Fetch the existing number from Twilio
+      Logger.info('Step 1: Fetching existing phone number from Twilio', { phoneNumber });
+      
+      const existingNumbers = await client.incomingPhoneNumbers.list({ phoneNumber });
+      
+      if (!existingNumbers || existingNumbers.length === 0) {
+        throw new Error(`Phone number ${phoneNumber} not found in Twilio account`);
+      }
+
+      const purchasedNumber = existingNumbers[0];
+      
+      Logger.info('Phone number found in Twilio', { 
+        sid: purchasedNumber.sid,
+        phoneNumber: purchasedNumber.phoneNumber,
+        friendlyName: purchasedNumber.friendlyName
+      });
+
+      // Get connector info for emergency address and trunk (same as purchase flow)
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId);
+      const { connection } = connectionInfo;
+      
+      const twilioConnector = await connection.db.collection('connectorsubaccount').findOne({
+        subaccountId,
+        connectorType: 'twilio'
+      });
+
+      if (!twilioConnector) {
+        throw new Error('Twilio connector not found for this subaccount');
+      }
+
+      const emergencyAddressId = twilioConnector.metadata?.retellIntegration?.emergencyAddressId;
+      const trunkSid = twilioConnector.metadata?.retellIntegration?.trunkSid;
+      const terminationSipUri = twilioConnector.metadata?.retellIntegration?.terminationSipUri;
+      
+      // Get decrypted SIP credentials
+      let sipCredentials = await this.getDecryptedSipCredentials(subaccountId);
+
+      if (!sipCredentials || !sipCredentials.username || !sipCredentials.password) {
+        Logger.warn('SIP credentials missing, fetching from trunk', { subaccountId });
+        const trunkResult = await this.fetchOrCreateTrunk(subaccountId);
+        sipCredentials = trunkResult.credentials;
+      }
+
+      if (!emergencyAddressId) {
+        throw new Error('Emergency address not configured. Please run Twilio setup first.');
+      }
+
+      if (!trunkSid) {
+        throw new Error('SIP trunk not configured. Please run Twilio setup first.');
+      }
+
+      // Now run all the post-purchase integration steps
+      return await this.completePhoneNumberIntegration(
+        subaccountId,
+        purchasedNumber,
+        emergencyAddressId,
+        trunkSid,
+        terminationSipUri,
+        sipCredentials,
+        connection
+      );
+
+    } catch (error) {
+      Logger.error('Failed to import existing phone number', {
+        subaccountId,
+        phoneNumber,
+        error: error.message,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Complete phone number integration steps (used by both purchase and import)
+   * Steps: Emergency address, trunk registration, Retell import, MongoDB storage
+   */
+  async completePhoneNumberIntegration(
+    subaccountId,
+    purchasedNumber,
+    emergencyAddressId,
+    trunkSid,
+    terminationSipUri,
+    sipCredentials,
+    connection
+  ) {
+    const phoneNumber = purchasedNumber.phoneNumber;
+    
+    try {
+      // Detect country code to determine if emergency address is needed
+      const phoneStr = phoneNumber.replace(/[^0-9+]/g, '');
+      let countryCode = 'US'; // default
+      
+      if (phoneStr.startsWith('+34')) {
+        countryCode = 'ES'; // Spain
+      } else if (phoneStr.startsWith('+44')) {
+        countryCode = 'GB'; // UK
+      } else if (phoneStr.startsWith('+1')) {
+        countryCode = 'US'; // US/Canada
+      } else if (phoneStr.startsWith('+')) {
+        const phoneCode = phoneStr.substring(1, 3);
+        const isoCode = this.phoneCountryCodeToISO[phoneCode] || this.phoneCountryCodeToISO[phoneStr.substring(1, 4)];
+        if (isoCode) countryCode = isoCode;
+      }
+      
+      // Countries that require emergency addresses
+      const countriesRequiringEmergencyAddress = ['US', 'GB', 'CA', 'AU'];
+      const requiresEmergencyAddress = countriesRequiringEmergencyAddress.includes(countryCode);
+      
+      // Step 2: Integrate with emergency address (only if required for this country)
+      if (requiresEmergencyAddress && emergencyAddressId) {
+        Logger.info('Step 2: Integrating with emergency address', { 
+          numberSid: purchasedNumber.sid,
+          emergencyAddressId,
+          countryCode 
+        });
+
+        await this.integrateNumberWithEmergencyAddress(
+          subaccountId, 
+          purchasedNumber.sid, 
+          emergencyAddressId
+        );
+      } else {
+        Logger.info('Step 2: Skipping emergency address (not required for this country)', { 
+          phoneNumber,
+          countryCode,
+          requiresEmergencyAddress
+        });
+      }
+
+      // Step 3: Register to trunk
+      Logger.info('Step 3: Registering number to trunk', { 
+        numberSid: purchasedNumber.sid,
+        trunkSid 
+      });
+
+      await this.registerNumberToTrunk(subaccountId, purchasedNumber.sid, trunkSid);
+
+      // Step 4: Import to Retell
+      Logger.info('Step 4: Importing number to Retell', { 
+        phoneNumber,
+        terminationSipUri 
+      });
+
+      const retellNumber = await this.importNumberToRetell(
+        subaccountId,
+        phoneNumber,
+        terminationSipUri,
+        sipCredentials
+      );
+
+      // Check if Retell import failed
+      if (retellNumber && !retellNumber.imported) {
+        Logger.warn('Retell import indicated failure but continuing', {
+          phoneNumber,
+          retellNumber
+        });
+      }
+
+      // Step 5: Store in MongoDB
+      Logger.info('Step 5: Storing phone number in MongoDB', { phoneNumber });
+
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      
+      const phoneNumberDocument = {
+        phone_number: phoneNumber,
+        phone_number_id: retellNumber?.phone_number_id || null,
+        sid: purchasedNumber.sid,
+        friendlyName: purchasedNumber.friendlyName,
+        subaccountId: subaccountId,
+        trunkSid: trunkSid,
+        emergencyAddressId: emergencyAddressId,
+        retellImported: retellNumber?.imported || false,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      await phoneNumbersCollection.updateOne(
+        { phone_number: phoneNumber, subaccountId },
+        { $set: phoneNumberDocument },
+        { upsert: true }
+      );
+
+      Logger.info('Phone number integration completed successfully', {
+        phoneNumber,
+        sid: purchasedNumber.sid,
+        retellImported: retellNumber?.imported || false
+      });
+
+      return {
+        twilioNumber: purchasedNumber,
+        retellNumber,
+        mongoDocument: phoneNumberDocument
+      };
+
+    } catch (integrationError) {
+      Logger.error('Phone number integration failed', {
+        phoneNumber,
+        sid: purchasedNumber.sid,
+        error: integrationError.message,
+        stack: integrationError.stack
+      });
+      throw integrationError;
+    }
+  }
+
   async purchasePhoneNumber(subaccountId, phoneNumber) {
     try {
       Logger.info('Starting phone number purchase flow', { 
@@ -2067,53 +2287,16 @@ class TwilioService {
       });
 
       try {
-        // Step 2: Integrate with emergency address
-        // Note: If addressSid was provided during purchase, the address is already set
-        // But we still call this to ensure it's properly configured (idempotent operation)
-        Logger.info('Step 2: Integrating with emergency address', { 
-          numberSid: purchasedNumber.sid,
-          emergencyAddressId 
-        });
-
-        // Only integrate if we have an emergency address
-        if (emergencyAddressId) {
-          await this.integrateNumberWithEmergencyAddress(
-            subaccountId, 
-            purchasedNumber.sid, 
-            emergencyAddressId
-          );
-        }
-
-        // Step 3: Register to trunk
-        Logger.info('Step 3: Registering number to trunk', { 
-          numberSid: purchasedNumber.sid,
-          trunkSid 
-        });
-
-        await this.registerNumberToTrunk(subaccountId, purchasedNumber.sid, trunkSid);
-
-        // Step 4: Import to Retell
-        Logger.info('Step 4: Importing number to Retell', { 
-          phoneNumber,
-          terminationSipUri 
-        });
-
-        const retellNumber = await this.importNumberToRetell(
+        // Run all integration steps using shared method
+        const integrationResult = await this.completePhoneNumberIntegration(
           subaccountId,
-          phoneNumber,
+          purchasedNumber,
+          emergencyAddressId,
+          trunkSid,
           terminationSipUri,
-          sipCredentials
+          sipCredentials,
+          connection
         );
-
-        // Check if Retell import failed
-        if (retellNumber && !retellNumber.imported) {
-          Logger.error('Retell import failed, triggering cleanup', {
-            subaccountId,
-            phoneNumber,
-            retellError: retellNumber.error
-          });
-          throw new Error(`Retell import failed: ${retellNumber.error || 'Unknown error'}`);
-        }
 
         // Invalidate phone numbers cache
         await redisService.del(`twilio:phoneNumbers:${subaccountId}`);
@@ -2122,7 +2305,7 @@ class TwilioService {
           subaccountId, 
           phoneNumber,
           sid: purchasedNumber.sid,
-          retellImported: !!retellNumber
+          retellImported: integrationResult.retellNumber?.imported || false
         });
 
         return {
@@ -2136,7 +2319,7 @@ class TwilioService {
             trunkSid: trunkSid,
             dateCreated: purchasedNumber.dateCreated
           },
-          retellNumber: retellNumber || null
+          retellNumber: integrationResult.retellNumber || null
         };
 
       } catch (integrationError) {

@@ -221,6 +221,10 @@ class CallController {
             subaccountId: subaccountId,
             lastUpdatedBy: 'webhook-service',
             lastUpdatedAt: new Date()
+          },
+          $setOnInsert: {
+            createdAt: new Date(), // Only set on insert, not on update
+            createdBy: 'webhook-service'
           }
         },
         { upsert: true }

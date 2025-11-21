@@ -8,6 +8,7 @@ const AIInsightsController = require('../controllers/aiInsightsController');
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
+const { attachTimezone, convertResponseDates, convertRequestDates } = require('../middleware/timezoneMiddleware');
 
 // Import validators
 const { validateSubaccountId } = require('../validators/databaseValidator');
@@ -20,6 +21,11 @@ const {
 router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
+
+// Apply timezone middleware
+router.use(attachTimezone);
+router.use(convertRequestDates);
+router.use(convertResponseDates);
 
 // GET /api/ai-insights/:subaccountId - Get AI insights (cached or generate new)
 router.get('/:subaccountId',

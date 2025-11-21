@@ -9,6 +9,7 @@ const { authenticateToken, requestLogger } = require('../middleware/authMiddlewa
 const { authenticateServiceToken } = require('../middleware/serviceAuthMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
+const { attachTimezone, convertResponseDates, convertRequestDates } = require('../middleware/timezoneMiddleware');
 
 // Import validators
 const { validateSubaccountId } = require('../validators/databaseValidator');
@@ -29,6 +30,11 @@ router.post('/:subaccountId/log',
 router.use(requestLogger);
 router.use(authenticateToken);
 router.use(userLimiter);
+
+// Apply timezone middleware
+router.use(attachTimezone);
+router.use(convertRequestDates);
+router.use(convertResponseDates);
 
 // GET /api/activities/:subaccountId - Get activities for last 24 hours (or custom range)
 router.get('/:subaccountId',

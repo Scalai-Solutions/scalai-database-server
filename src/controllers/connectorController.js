@@ -1810,6 +1810,80 @@ class ConnectorController {
   /**
    * Purchase a Twilio phone number with full integration
    */
+  /**
+   * Import an existing Twilio phone number (already purchased, just needs integration)
+   * POST /api/connectors/:subaccountId/twilio/phoneNumbers/import
+   */
+  async importExistingPhoneNumber(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { phoneNumber } = req.body;
+
+      if (!phoneNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'phoneNumber is required',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      Logger.info('Importing existing Twilio phone number', {
+        subaccountId,
+        phoneNumber,
+        requestId: req.requestId
+      });
+
+      const result = await twilioService.importExistingPhoneNumber(subaccountId, phoneNumber);
+
+      Logger.info('Phone number imported and integrated successfully', {
+        subaccountId,
+        phoneNumber,
+        sid: result.twilioNumber.sid,
+        retellImported: result.retellNumber?.imported || false
+      });
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.CONNECTOR_UPDATED,
+        category: ACTIVITY_CATEGORIES.CONNECTOR,
+        userId: req.user?.id || 'system',
+        description: `Existing Twilio phone number imported and configured: ${phoneNumber}`,
+        metadata: {
+          phoneNumber,
+          sid: result.twilioNumber.sid,
+          friendlyName: result.twilioNumber.friendlyName,
+          emergencyAddressIntegrated: true,
+          trunkRegistered: true,
+          retellImported: result.retellNumber?.imported || false
+        },
+        resourceId: result.twilioNumber.sid,
+        resourceName: phoneNumber,
+        operationId: req.requestId
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Phone number imported and integrated successfully',
+        data: result
+      });
+
+    } catch (error) {
+      Logger.error('Failed to import existing phone number', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId: req.params.subaccountId,
+        phoneNumber: req.body.phoneNumber
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to import phone number',
+        code: 'IMPORT_ERROR'
+      });
+    }
+  }
+
   async purchaseTwilioPhoneNumber(req, res) {
     try {
       const { subaccountId } = req.params;

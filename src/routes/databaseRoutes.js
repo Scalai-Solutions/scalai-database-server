@@ -9,6 +9,7 @@ const { authenticateToken, requestLogger } = require('../middleware/authMiddlewa
 const { authenticateTokenOrService } = require('../middleware/serviceAuthMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
+const { attachTimezone, convertResponseDates, convertRequestDates } = require('../middleware/timezoneMiddleware');
 
 // Import validators
 const { 
@@ -23,6 +24,12 @@ const {
 
 // Apply common middleware to request logging only (auth is per-route)
 router.use(requestLogger);
+
+// Apply timezone middleware to all routes
+// This will fetch the timezone for the subaccount and convert dates as needed
+router.use(attachTimezone);
+router.use(convertRequestDates);
+router.use(convertResponseDates);
 
 // Routes that support service authentication (defined before global auth middleware)
 // GET /api/database/:subaccountId/agents/:agentId/email-template - Get agent email template (supports service auth)

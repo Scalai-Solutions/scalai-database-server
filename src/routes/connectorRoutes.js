@@ -27,6 +27,29 @@ const {
 // Apply request logger to all routes
 router.use(requestLogger);
 
+// =============================================================================
+// SERVICE-TO-SERVICE ROUTES (No JWT auth, use service token auth only)
+// These routes MUST be defined BEFORE the authenticateToken middleware
+// =============================================================================
+
+// DELETE /api/connectors/:subaccountId/twilio-trunk - Delete Twilio trunk (service-to-service)
+router.delete('/:subaccountId/twilio-trunk',
+  validateSubaccountId,
+  authenticateServiceToken,
+  ConnectorController.deleteTwilioTrunk
+);
+
+// POST /api/connectors/:subaccountId/twilio/release-phone-numbers - Release phone numbers from Twilio (service-to-service)
+router.post('/:subaccountId/twilio/release-phone-numbers',
+  validateSubaccountId,
+  authenticateServiceToken,
+  ConnectorController.releasePhoneNumbersFromTwilio
+);
+
+// =============================================================================
+// USER ROUTES (Require JWT authentication)
+// =============================================================================
+
 // Apply JWT authentication middleware for remaining routes
 router.use(authenticateToken);
 router.use(userLimiter);
@@ -202,6 +225,14 @@ router.post('/:subaccountId/twilio/phoneNumbers/purchase',
   ConnectorController.purchaseTwilioPhoneNumber
 );
 
+// POST /api/connectors/:subaccountId/twilio/phoneNumbers/import - Import an existing phone number
+router.post('/:subaccountId/twilio/phoneNumbers/import',
+  validateSubaccountId,
+  requireResourcePermission(),
+  subaccountLimiter(20, 60000),
+  ConnectorController.importExistingPhoneNumber
+);
+
 // GET /api/connectors/:subaccountId/twilio - Get Twilio account info
 router.get('/:subaccountId/twilio',
   validateSubaccountId,
@@ -224,20 +255,6 @@ router.delete('/:subaccountId/twilio/cache',
   requireResourcePermission(),
   subaccountLimiter(50, 60000),
   ConnectorController.invalidateTwilioCache
-);
-
-// DELETE /api/connectors/:subaccountId/twilio-trunk - Delete Twilio trunk (service-to-service)
-router.delete('/:subaccountId/twilio-trunk',
-  validateSubaccountId,
-  authenticateServiceToken,
-  ConnectorController.deleteTwilioTrunk
-);
-
-// POST /api/connectors/:subaccountId/twilio/release-phone-numbers - Release phone numbers from Twilio (service-to-service)
-router.post('/:subaccountId/twilio/release-phone-numbers',
-  validateSubaccountId,
-  authenticateServiceToken,
-  ConnectorController.releasePhoneNumbersFromTwilio
 );
 
 module.exports = router;
