@@ -1120,6 +1120,10 @@ class WhatsAppService {
    * Get or create chat session for WhatsApp contact
    */
   async getOrCreateChatSession(subaccountId, agentId, phoneNumber) {
+    // Use Redis lock to prevent race condition when creating chats
+    const lockKey = `whatsapp:chat:lock:${subaccountId}:${agentId}:${phoneNumber}`;
+    let lockAcquired = false;
+    
     try {
       const systemUserId = 'whatsapp-service';
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, systemUserId);
@@ -1127,7 +1131,7 @@ class WhatsAppService {
       
       const chatsCollection = connection.db.collection('chats');
       
-      // Look for existing active chat for this WhatsApp contact
+      // First check without lock (most common case - chat already exists)
       let chatDocument = await chatsCollection.findOne({
         subaccountId,
         agent_id: agentId,
@@ -1137,6 +1141,70 @@ class WhatsAppService {
       
       if (chatDocument) {
         Logger.debug('Using existing chat session for WhatsApp contact', {
+          chatId: chatDocument.chat_id,
+          phoneNumber
+        });
+        return chatDocument.chat_id;
+      }
+      
+      // Try to acquire lock before creating new chat
+      if (redisService.isConnected) {
+        try {
+          // Try to set lock with NX (only if not exists) and 10 second expiration
+          lockAcquired = await redisService.set(lockKey, '1', 10, 'NX');
+          
+          if (!lockAcquired) {
+            // Another request is creating the chat, wait and retry
+            Logger.debug('Another request is creating chat, waiting...', {
+              phoneNumber,
+              agentId
+            });
+            
+            await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
+            
+            // Check again if chat was created by the other request
+            chatDocument = await chatsCollection.findOne({
+              subaccountId,
+              agent_id: agentId,
+              'metadata.whatsapp_phone': phoneNumber,
+              chat_status: 'ongoing'
+            });
+            
+            if (chatDocument) {
+              Logger.debug('Chat created by another request, using it', {
+                chatId: chatDocument.chat_id,
+                phoneNumber
+              });
+              return chatDocument.chat_id;
+            }
+            
+            // Still no chat, try to acquire lock again
+            lockAcquired = await redisService.set(lockKey, '1', 10, 'NX');
+            if (!lockAcquired) {
+              Logger.warn('Could not acquire lock after retry, proceeding anyway', {
+                phoneNumber,
+                agentId
+              });
+            }
+          }
+        } catch (lockError) {
+          Logger.warn('Failed to acquire Redis lock, proceeding anyway', {
+            error: lockError.message,
+            phoneNumber
+          });
+        }
+      }
+      
+      // Double-check one more time before creating (in case of race condition)
+      chatDocument = await chatsCollection.findOne({
+        subaccountId,
+        agent_id: agentId,
+        'metadata.whatsapp_phone': phoneNumber,
+        chat_status: 'ongoing'
+      });
+      
+      if (chatDocument) {
+        Logger.debug('Chat created by concurrent request, using it', {
           chatId: chatDocument.chat_id,
           phoneNumber
         });
@@ -1193,6 +1261,19 @@ class WhatsAppService {
         phoneNumber
       });
       throw error;
+    } finally {
+      // Release the lock
+      if (lockAcquired && redisService.isConnected) {
+        try {
+          await redisService.del(lockKey);
+          Logger.debug('Chat creation lock released', { phoneNumber });
+        } catch (unlockError) {
+          Logger.warn('Failed to release chat creation lock', {
+            error: unlockError.message,
+            phoneNumber
+          });
+        }
+      }
     }
   }
 

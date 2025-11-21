@@ -359,6 +359,10 @@ class InstagramService {
    * Get or create chat session for Instagram user
    */
   async getOrCreateChatSession(subaccountId, agentId, instagramUserId) {
+    // Use Redis lock to prevent race condition when creating chats
+    const lockKey = `instagram:chat:lock:${subaccountId}:${agentId}:${instagramUserId}`;
+    let lockAcquired = false;
+    
     try {
       const systemUserId = 'instagram-service';
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, systemUserId);
@@ -366,7 +370,7 @@ class InstagramService {
       
       const chatsCollection = connection.db.collection('chats');
       
-      // Look for existing active chat for this Instagram user
+      // First check without lock (most common case - chat already exists)
       let chatDocument = await chatsCollection.findOne({
         subaccountId,
         agent_id: agentId,
@@ -376,6 +380,66 @@ class InstagramService {
       
       if (chatDocument) {
         Logger.debug('Using existing chat session for Instagram user', {
+          chatId: chatDocument.chat_id,
+          instagramUserId
+        });
+        return chatDocument.chat_id;
+      }
+      
+      // Try to acquire lock before creating new chat
+      if (redisService.isConnected) {
+        try {
+          lockAcquired = await redisService.set(lockKey, '1', 10, 'NX');
+          
+          if (!lockAcquired) {
+            Logger.debug('Another request is creating chat, waiting...', {
+              instagramUserId,
+              agentId
+            });
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            chatDocument = await chatsCollection.findOne({
+              subaccountId,
+              agent_id: agentId,
+              'metadata.instagram_user_id': instagramUserId,
+              chat_status: 'ongoing'
+            });
+            
+            if (chatDocument) {
+              Logger.debug('Chat created by another request, using it', {
+                chatId: chatDocument.chat_id,
+                instagramUserId
+              });
+              return chatDocument.chat_id;
+            }
+            
+            lockAcquired = await redisService.set(lockKey, '1', 10, 'NX');
+            if (!lockAcquired) {
+              Logger.warn('Could not acquire lock after retry, proceeding anyway', {
+                instagramUserId,
+                agentId
+              });
+            }
+          }
+        } catch (lockError) {
+          Logger.warn('Failed to acquire Redis lock, proceeding anyway', {
+            error: lockError.message,
+            instagramUserId
+          });
+        }
+      }
+      
+      // Double-check one more time before creating
+      chatDocument = await chatsCollection.findOne({
+        subaccountId,
+        agent_id: agentId,
+        'metadata.instagram_user_id': instagramUserId,
+        chat_status: 'ongoing'
+      });
+      
+      if (chatDocument) {
+        Logger.debug('Chat created by concurrent request, using it', {
           chatId: chatDocument.chat_id,
           instagramUserId
         });
@@ -432,6 +496,19 @@ class InstagramService {
         instagramUserId
       });
       throw error;
+    } finally {
+      // Release the lock
+      if (lockAcquired && redisService.isConnected) {
+        try {
+          await redisService.del(lockKey);
+          Logger.debug('Chat creation lock released', { instagramUserId });
+        } catch (unlockError) {
+          Logger.warn('Failed to release chat creation lock', {
+            error: unlockError.message,
+            instagramUserId
+          });
+        }
+      }
     }
   }
 
