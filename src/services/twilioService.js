@@ -3513,7 +3513,7 @@ class TwilioService {
         results.retell.reason = 'Retell API key not configured';
       }
 
-      // Delete from Twilio
+      // Unregister from Twilio trunk (but keep the number purchased)
       try {
         const client = await this.getTwilioClient(subaccountId);
 
@@ -3524,38 +3524,74 @@ class TwilioService {
 
         if (incomingNumbers.length > 0) {
           const phoneNumberSid = incomingNumbers[0].sid;
+          const currentTrunkSid = incomingNumbers[0].trunkSid;
           
-          // Step 1: Remove emergency address if present (required by Twilio before deletion)
+          // Step 1: Remove from trunk if connected
+          if (currentTrunkSid) {
+            try {
+              Logger.info('Removing phone number from trunk', { 
+                phoneNumber, 
+                phoneNumberSid,
+                trunkSid: currentTrunkSid
+              });
+              
+              await client.trunking.v1
+                .trunks(currentTrunkSid)
+                .phoneNumbers(phoneNumberSid)
+                .remove();
+              
+              Logger.info('Phone number removed from trunk successfully', { 
+                phoneNumber,
+                trunkSid: currentTrunkSid
+              });
+            } catch (trunkError) {
+              Logger.warn('Failed to remove from trunk (may not be in trunk)', {
+                phoneNumber,
+                trunkSid: currentTrunkSid,
+                error: trunkError.message
+              });
+              // Continue even if trunk removal fails
+            }
+          } else {
+            Logger.info('Phone number not connected to any trunk', { phoneNumber });
+          }
+          
+          // Step 2: Clear voice URL and status callback (reset to idle state)
           try {
-            Logger.debug('Removing emergency address from phone number before deletion', { 
+            Logger.debug('Resetting phone number configuration', { 
               phoneNumber, 
               phoneNumberSid 
             });
             
             await client.incomingPhoneNumbers(phoneNumberSid).update({
-              emergencyAddressSid: '' // Remove emergency address
+              voiceUrl: '', // Clear voice URL
+              statusCallback: '', // Clear status callback
+              voiceMethod: 'POST',
+              statusCallbackMethod: 'POST'
             });
             
-            Logger.debug('Emergency address removed successfully', { phoneNumber });
-          } catch (addressError) {
-            Logger.warn('Failed to remove emergency address (may not be set)', {
+            Logger.info('Phone number configuration reset successfully', { phoneNumber });
+          } catch (updateError) {
+            Logger.warn('Failed to reset phone number configuration', {
               phoneNumber,
-              error: addressError.message
+              error: updateError.message
             });
-            // Continue with deletion even if address removal fails
+            // Continue even if config reset fails
           }
           
-          // Step 2: Delete the phone number
-          await client.incomingPhoneNumbers(phoneNumberSid).remove();
           results.twilio.success = true;
-          Logger.info('Phone number deleted from Twilio', { phoneNumber });
+          results.twilio.action = 'unregistered_from_trunk';
+          Logger.info('Phone number kept in Twilio (not released)', { 
+            phoneNumber,
+            note: 'Number remains purchased and can be reused'
+          });
         } else {
           results.twilio.skipped = true;
           results.twilio.reason = 'Phone number not found in Twilio';
           Logger.warn('Phone number not found in Twilio', { phoneNumber });
         }
       } catch (twilioError) {
-        Logger.error('Failed to delete phone number from Twilio', {
+        Logger.error('Failed to unregister phone number from trunk', {
           phoneNumber,
           error: twilioError.message
         });
