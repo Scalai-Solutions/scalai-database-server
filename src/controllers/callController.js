@@ -82,54 +82,16 @@ class CallController {
       const callOptions = { metadata: enhancedMetadata };
       const webCallResponse = await retell.createWebCall(agentId, callOptions);
 
-      // Get storage for CALLS only (MongoDB or Mock based on session)
-      const storage = await getStorageFromRequest(req, subaccountId, userId);
-      const callsCollection = await storage.getCollection('calls');
-      const now = new Date();
-      const callDocument = {
-        call_id: webCallResponse.call_id,
-        agent_id: agentId,
-        call_type: 'web_call',
-        access_token: webCallResponse.access_token,
-        sample_rate: webCallResponse.sample_rate,
-        call_status: webCallResponse.call_status || 'registered',
-        start_timestamp: now.getTime(), // Add timestamp for filtering
-        metadata: enhancedMetadata,
-        subaccountId: subaccountId,
-        createdBy: userId,
-        createdAt: now,
-        operationId: operationId,
-        retellAccountId: retellAccountData.id,
-        _isMockSession: req.mockSession?.isMock || false,
-        _mockSessionId: req.mockSession?.sessionId || null
-      };
-
-      await callsCollection.insertOne(callDocument);
-      
-      Logger.info('Web call created and stored', {
+      // Note: Web calls are NOT stored in MongoDB - they are ephemeral and only exist in Retell
+      Logger.info('Web call created (not stored in MongoDB)', {
         operationId,
         subaccountId,
         agentId,
         callId: webCallResponse.call_id,
-        isMockSession: req.mockSession?.isMock || false,
-        storageType: storage.isMock ? 'Redis (Mock)' : 'MongoDB'
+        isMockSession: req.mockSession?.isMock || false
       });
 
-      // Invalidate call logs cache
-      if (redisService.isConnected) {
-        try {
-          await redisService.invalidateCallLogs(subaccountId);
-          Logger.debug('Call logs cache invalidated after web call creation', {
-            operationId,
-            subaccountId
-          });
-        } catch (cacheError) {
-          Logger.warn('Failed to invalidate call logs cache', {
-            operationId,
-            error: cacheError.message
-          });
-        }
-      }
+      // Note: No cache invalidation needed for web calls since they're not stored in MongoDB
 
       // Log activity
       await ActivityService.logActivity({
@@ -205,6 +167,29 @@ class CallController {
           success: false,
           message: 'callId and updateData are required',
           code: 'MISSING_REQUIRED_FIELDS'
+        });
+      }
+
+      // Skip storing web_call calls in MongoDB - they are ephemeral and only exist in Retell
+      if (updateData.call_type === 'web_call') {
+        Logger.debug('Skipping MongoDB storage for web_call', {
+          operationId,
+          subaccountId,
+          callId
+        });
+
+        return res.json({
+          success: true,
+          message: 'Web call update skipped (web calls are not stored in MongoDB)',
+          data: {
+            callId,
+            skipped: true,
+            reason: 'web_call type not stored in MongoDB'
+          },
+          meta: {
+            operationId,
+            duration: `${Date.now() - startTime}ms`
+          }
         });
       }
 

@@ -9,6 +9,8 @@ const { v4: uuidv4 } = require('uuid');
 const ActivityService = require('../services/activityService');
 const { ACTIVITY_TYPES, ACTIVITY_CATEGORIES } = ActivityService;
 const { getStorageFromRequest } = require('../services/storageManager');
+const whatsappService = require('../services/whatsappService');
+const instagramService = require('../services/instagramService');
 
 class DatabaseController {
   // Create agent
@@ -5405,7 +5407,43 @@ After appointment is booked:
 
       const retell = new Retell(retellAccountData.apiKey, retellAccountData);
 
-      // Step 3: Delete agent from Retell
+      // Step 3: Disconnect WhatsApp (if connected)
+      let whatsappDisconnected = false;
+      try {
+        await whatsappService.disconnect(subaccountId, agentId, userId);
+        whatsappDisconnected = true;
+        Logger.info('WhatsApp disconnected successfully', {
+          operationId,
+          agentId
+        });
+      } catch (error) {
+        Logger.warn('Failed to disconnect WhatsApp (may not be connected)', {
+          operationId,
+          agentId,
+          error: error.message
+        });
+        // Continue with deletion even if WhatsApp disconnect fails
+      }
+
+      // Step 4: Disconnect Instagram (if connected)
+      let instagramDisconnected = false;
+      try {
+        await instagramService.disconnect(subaccountId, agentId, userId);
+        instagramDisconnected = true;
+        Logger.info('Instagram disconnected successfully', {
+          operationId,
+          agentId
+        });
+      } catch (error) {
+        Logger.warn('Failed to disconnect Instagram (may not be connected)', {
+          operationId,
+          agentId,
+          error: error.message
+        });
+        // Continue with deletion even if Instagram disconnect fails
+      }
+
+      // Step 5: Delete agent from Retell
       try {
         await retell.deleteChatAgent(agentId);
         Logger.info('Chat agent deleted from Retell', {
@@ -5421,7 +5459,7 @@ After appointment is booked:
         // Continue with deletion even if Retell deletion fails
       }
 
-      // Step 4: Delete LLM from Retell
+      // Step 6: Delete LLM from Retell
       if (llmId) {
         try {
           await retell.deleteLLM(llmId);
@@ -5439,7 +5477,33 @@ After appointment is booked:
         }
       }
 
-      // Step 5: Delete all chats associated with this agent
+      // Step 7: Delete WhatsApp connections from MongoDB
+      const whatsappConnectionsCollection = connection.db.collection('whatsappconnections');
+      const whatsappConnectionsDeleteResult = await whatsappConnectionsCollection.deleteMany({
+        subaccountId: subaccountId,
+        agentId: agentId
+      });
+
+      Logger.info('WhatsApp connections deleted from MongoDB', {
+        operationId,
+        agentId,
+        deletedCount: whatsappConnectionsDeleteResult.deletedCount
+      });
+
+      // Step 8: Delete Instagram connections from MongoDB
+      const instagramConnectionsCollection = connection.db.collection('instagramconnections');
+      const instagramConnectionsDeleteResult = await instagramConnectionsCollection.deleteMany({
+        subaccountId: subaccountId,
+        agentId: agentId
+      });
+
+      Logger.info('Instagram connections deleted from MongoDB', {
+        operationId,
+        agentId,
+        deletedCount: instagramConnectionsDeleteResult.deletedCount
+      });
+
+      // Step 9: Delete all chats associated with this agent
       const chatsDeleteResult = await chatsCollection.deleteMany({ 
         agent_id: agentId,
         subaccountId: subaccountId 
@@ -5451,7 +5515,7 @@ After appointment is booked:
         deletedCount: chatsDeleteResult.deletedCount
       });
 
-      // Step 6: Delete chat agent document from MongoDB
+      // Step 9: Delete chat agent document from MongoDB
       const agentDeleteResult = await chatAgentsCollection.deleteOne({ 
         agentId: agentId,
         subaccountId: subaccountId 
@@ -5463,21 +5527,21 @@ After appointment is booked:
         deletedCount: agentDeleteResult.deletedCount
       });
 
-      // Step 7: Delete LLM document from MongoDB
+      // Step 10: Delete LLM document from MongoDB
       if (llmId) {
         const llmDeleteResult = await llmsCollection.deleteOne({ 
           llmId: llmId,
           subaccountId: subaccountId 
         });
 
-        Logger.info('LLM document deleted from MongoDB', {
-          operationId,
-          llmId,
-          deletedCount: llmDeleteResult.deletedCount
-        });
+      Logger.info('LLM document deleted from MongoDB', {
+        operationId,
+        llmId,
+        deletedCount: llmDeleteResult.deletedCount
+      });
       }
 
-      // Step 8: Invalidate cache for this agent and its chats
+      // Step 11: Invalidate cache for this agent and its chats
       try {
         await redisService.invalidateChatAgentStats(subaccountId, agentId);
         await redisService.invalidateChatList(subaccountId);
@@ -5492,7 +5556,7 @@ After appointment is booked:
         });
       }
 
-      // Log activity
+      // Step 12: Log activity
       await ActivityService.logActivity({
         subaccountId,
         activityType: ACTIVITY_TYPES.CHAT_AGENT_DELETED,
@@ -5503,7 +5567,11 @@ After appointment is booked:
           agentId,
           agentName: agentDocument.name,
           llmId,
-          chatsDeleted: chatsDeleteResult.deletedCount
+          chatsDeleted: chatsDeleteResult.deletedCount,
+          whatsappDisconnected,
+          instagramDisconnected,
+          whatsappConnectionsDeleted: whatsappConnectionsDeleteResult.deletedCount,
+          instagramConnectionsDeleted: instagramConnectionsDeleteResult.deletedCount
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
@@ -5519,6 +5587,10 @@ After appointment is booked:
           agentId,
           llmId,
           chatsDeleted: chatsDeleteResult.deletedCount,
+          whatsappDisconnected,
+          instagramDisconnected,
+          whatsappConnectionsDeleted: whatsappConnectionsDeleteResult.deletedCount,
+          instagramConnectionsDeleted: instagramConnectionsDeleteResult.deletedCount,
           deletedFromRetell: true,
           deletedFromDatabase: true
         },
