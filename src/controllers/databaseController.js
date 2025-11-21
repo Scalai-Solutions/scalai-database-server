@@ -2250,7 +2250,10 @@ After appointment is booked:
       const successTimelineAggregation = await callsCollection.aggregate([
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: periodStart.getTime(),
               $lte: periodEnd.getTime()
@@ -2293,7 +2296,10 @@ After appointment is booked:
       const peakHoursAggregation = await callsCollection.aggregate([
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: periodStart.getTime(),
               $lte: periodEnd.getTime()
@@ -2320,7 +2326,10 @@ After appointment is booked:
       const outcomeDistributionAggregation = await callsCollection.aggregate([
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: periodStart.getTime(),
               $lte: periodEnd.getTime()
@@ -2344,7 +2353,10 @@ After appointment is booked:
       const overallStatsAggregation = await callsCollection.aggregate([
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: periodStart.getTime(),
               $lte: periodEnd.getTime()
@@ -2638,7 +2650,10 @@ After appointment is booked:
         // Match calls for this agent in the date range
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: periodStart.getTime(),
               $lte: periodEnd.getTime()
@@ -2675,7 +2690,10 @@ After appointment is booked:
       const overallSummaryAggregation = await callsCollection.aggregate([
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: periodStart.getTime(),
               $lte: periodEnd.getTime()
@@ -2723,7 +2741,10 @@ After appointment is booked:
       const callDetailsAggregation = await callsCollection.aggregate([
         {
           $match: {
-            agent_id: agentId,
+            $or: [
+              { agent_id: agentId },
+              { agentId: agentId }
+            ],
             start_timestamp: {
               $gte: periodStart.getTime(),
               $lte: periodEnd.getTime()
