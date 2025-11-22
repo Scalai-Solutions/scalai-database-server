@@ -2766,7 +2766,9 @@ After appointment is booked:
             duration: '$call_cost.total_duration_seconds',
             combinedCost: { $divide: [{ $ifNull: ['$call_cost.combined_cost', 0] }, 100] },
             productCosts: '$call_cost.product_costs',
-            durationUnitPrice: { $divide: [{ $ifNull: ['$call_cost.total_duration_unit_price', 0] }, 100] }
+            durationUnitPrice: { $divide: [{ $ifNull: ['$call_cost.total_duration_unit_price', 0] }, 100] },
+            success_rate: '$success_rate',
+            call_analysis: '$call_analysis'
           }
         }
       ]).toArray();
@@ -2786,21 +2788,33 @@ After appointment is booked:
       const totalProductCosts = productBreakdown.reduce((sum, item) => sum + item.totalCost, 0);
 
       // Format calls
-      const calls = callDetailsAggregation.map(call => ({
-        callId: call.callId,
-        startTimestamp: call.startTimestamp,
-        endTimestamp: call.endTimestamp,
-        startDate: call.startTimestamp ? new Date(call.startTimestamp).toISOString() : null,
-        endDate: call.endTimestamp ? new Date(call.endTimestamp).toISOString() : null,
-        duration: call.duration || 0,
-        combinedCost: call.combinedCost ? Math.round(call.combinedCost * 100) / 100 : 0,
-        durationUnitPrice: call.durationUnitPrice ? Math.round(call.durationUnitPrice * 1000000) / 1000000 : 0,
-        productCosts: (call.productCosts || []).map(pc => ({
-          product: pc.product,
-          unitPrice: Math.round((pc.unit_price || 0) * 1000000) / 1000000,
-          cost: Math.round(((pc.cost || 0) / 100) * 100) / 100
-        }))
-      }));
+      const { calculateCallSuccessRate } = require('../utils/callHelper');
+      const calls = callDetailsAggregation.map(call => {
+        // Calculate success_rate if not present but call_analysis exists
+        let successRate = call.success_rate;
+        if (successRate === null || successRate === undefined) {
+          if (call.call_analysis) {
+            successRate = calculateCallSuccessRate(call.call_analysis);
+          }
+        }
+        
+        return {
+          callId: call.callId,
+          startTimestamp: call.startTimestamp,
+          endTimestamp: call.endTimestamp,
+          startDate: call.startTimestamp ? new Date(call.startTimestamp).toISOString() : null,
+          endDate: call.endTimestamp ? new Date(call.endTimestamp).toISOString() : null,
+          duration: call.duration || 0,
+          combinedCost: call.combinedCost ? Math.round(call.combinedCost * 100) / 100 : 0,
+          durationUnitPrice: call.durationUnitPrice ? Math.round(call.durationUnitPrice * 1000000) / 1000000 : 0,
+          success_rate: successRate !== null && successRate !== undefined ? successRate : null,
+          productCosts: (call.productCosts || []).map(pc => ({
+            product: pc.product,
+            unitPrice: Math.round((pc.unit_price || 0) * 1000000) / 1000000,
+            cost: Math.round(((pc.cost || 0) / 100) * 100) / 100
+          }))
+        };
+      });
 
       // Build response
       const responseData = {

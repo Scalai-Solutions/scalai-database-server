@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const ActivityService = require('../services/activityService');
 const { ACTIVITY_TYPES, ACTIVITY_CATEGORIES } = ActivityService;
 const { getStorageFromRequest } = require('../services/storageManager');
+const { calculateCallSuccessRate } = require('../utils/callHelper');
 
 class CallController {
   /**
@@ -196,6 +197,37 @@ class CallController {
       // Get storage (MongoDB or Mock based on session)
       const storage = await getStorageFromRequest(req, subaccountId, 'webhook-service');
       const callsCollection = await storage.getCollection('calls');
+
+      // Calculate success_rate if call_analysis is being updated
+      let successRate = null;
+      if (updateData.call_analysis) {
+        successRate = calculateCallSuccessRate(updateData.call_analysis);
+        if (successRate !== null) {
+          updateData.success_rate = successRate;
+          Logger.debug('Success rate calculated for call', {
+            operationId,
+            subaccountId,
+            callId,
+            successRate
+          });
+        }
+      } else {
+        // If call_analysis is not being updated, try to calculate from existing document
+        // This handles cases where call_analysis was updated in a previous webhook
+        const existingCall = await callsCollection.findOne({ call_id: callId });
+        if (existingCall?.call_analysis && !existingCall.success_rate) {
+          successRate = calculateCallSuccessRate(existingCall.call_analysis);
+          if (successRate !== null) {
+            updateData.success_rate = successRate;
+            Logger.debug('Success rate calculated from existing call_analysis', {
+              operationId,
+              subaccountId,
+              callId,
+              successRate
+            });
+          }
+        }
+      }
 
       // Upsert the call document
       const result = await callsCollection.updateOne(
@@ -593,6 +625,7 @@ class CallController {
 
         // Fetch calls from hybrid storage
         // Sort by start_timestamp (not createdAt) to match Retell API behavior
+        // Include success_rate in projection
         let calls = await callsCollection
           .find(query)
           .sort({ start_timestamp: -1 })
@@ -610,6 +643,27 @@ class CallController {
           if (!call.subaccountId && !call._mockSession) return true;
           
           return false;
+        });
+
+        // Ensure success_rate is included in response (calculate if missing)
+        calls = calls.map(call => {
+          // If success_rate already exists, keep it
+          if (call.success_rate !== null && call.success_rate !== undefined) {
+            return call;
+          }
+          
+          // Otherwise, try to calculate from call_analysis
+          if (call.call_analysis) {
+            const calculatedRate = calculateCallSuccessRate(call.call_analysis);
+            if (calculatedRate !== null) {
+              return {
+                ...call,
+                success_rate: calculatedRate
+              };
+            }
+          }
+          
+          return call;
         });
 
         Logger.debug('🎭 Mock hybrid fetch results', {
@@ -762,24 +816,44 @@ class CallController {
         const { connection } = connectionInfo;
         const callsCollection = connection.db.collection('calls');
 
-        // Get all call_ids that exist in MongoDB for this subaccount
+        // Get all call_ids and success_rate that exist in MongoDB for this subaccount
         const callIdsInMongo = await callsCollection
           .find(
             { subaccountId: subaccountId },
-            { projection: { call_id: 1, _id: 0 } }
+            { projection: { call_id: 1, success_rate: 1, _id: 0 } }
           )
           .toArray();
 
         const mongoCallIdSet = new Set(callIdsInMongo.map(doc => doc.call_id));
+        // Create a map of call_id to success_rate for quick lookup
+        const successRateMap = new Map(
+          callIdsInMongo
+            .filter(doc => doc.success_rate !== null && doc.success_rate !== undefined)
+            .map(doc => [doc.call_id, doc.success_rate])
+        );
 
         Logger.debug('MongoDB call_ids retrieved', {
           operationId,
           subaccountId,
-          mongoCallCount: mongoCallIdSet.size
+          mongoCallCount: mongoCallIdSet.size,
+          successRateCount: successRateMap.size
         });
 
         // Filter Retell responses to only include calls present in MongoDB
-        callResponses = retellCallResponses.filter(call => mongoCallIdSet.has(call.call_id));
+        // and enrich with success_rate from MongoDB
+        callResponses = retellCallResponses
+          .filter(call => mongoCallIdSet.has(call.call_id))
+          .map(call => {
+            // Add success_rate from MongoDB if available
+            const successRate = successRateMap.get(call.call_id);
+            if (successRate !== undefined) {
+              return {
+                ...call,
+                success_rate: successRate
+              };
+            }
+            return call;
+          });
 
         const filteredOutCount = retellCallResponses.length - callResponses.length;
 
