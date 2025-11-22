@@ -968,7 +968,20 @@ After appointment is booked:
         });
       }
 
-      // Step 7: Invalidate cache for this agent
+      // Step 7: Delete all calls associated with this agent
+      const callsCollection = connection.db.collection('calls');
+      const callsDeleteResult = await callsCollection.deleteMany({
+        subaccountId: subaccountId,
+        agent_id: agentId
+      });
+
+      Logger.info('Calls associated with agent deleted from MongoDB', {
+        operationId,
+        agentId,
+        deletedCallsCount: callsDeleteResult.deletedCount
+      });
+
+      // Step 8: Invalidate cache for this agent
       try {
         await redisService.invalidateAgentStats(subaccountId, agentId);
         Logger.debug('Agent statistics cache invalidated', {
@@ -988,11 +1001,12 @@ After appointment is booked:
         activityType: ACTIVITY_TYPES.AGENT_DELETED,
         category: ACTIVITY_CATEGORIES.AGENT,
         userId,
-        description: `Agent "${agentDocument.name}" deleted`,
+        description: `Agent "${agentDocument.name}" deleted (including ${callsDeleteResult.deletedCount} associated calls)`,
         metadata: {
           agentId,
           agentName: agentDocument.name,
-          llmId
+          llmId,
+          deletedCallsCount: callsDeleteResult.deletedCount
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
@@ -1003,12 +1017,13 @@ After appointment is booked:
 
       res.json({
         success: true,
-        message: 'Agent deleted successfully',
+        message: `Agent and ${callsDeleteResult.deletedCount} associated call(s) deleted successfully`,
         data: {
           agentId,
           llmId,
           deletedFromRetell: true,
-          deletedFromDatabase: true
+          deletedFromDatabase: true,
+          deletedCallsCount: callsDeleteResult.deletedCount
         },
         meta: {
           operationId,
@@ -5550,7 +5565,7 @@ After appointment is booked:
         deletedCount: chatsDeleteResult.deletedCount
       });
 
-      // Step 9: Delete chat agent document from MongoDB
+      // Step 10: Delete chat agent document from MongoDB
       const agentDeleteResult = await chatAgentsCollection.deleteOne({ 
         agentId: agentId,
         subaccountId: subaccountId 
@@ -5591,13 +5606,13 @@ After appointment is booked:
         });
       }
 
-      // Step 12: Log activity
+      // Step 11: Log activity
       await ActivityService.logActivity({
         subaccountId,
         activityType: ACTIVITY_TYPES.CHAT_AGENT_DELETED,
         category: ACTIVITY_CATEGORIES.AGENT,
         userId,
-        description: `Chat agent "${agentDocument.name}" deleted`,
+        description: `Chat agent "${agentDocument.name}" deleted (including ${chatsDeleteResult.deletedCount} associated chats)`,
         metadata: {
           agentId,
           agentName: agentDocument.name,
@@ -5617,7 +5632,7 @@ After appointment is booked:
 
       res.json({
         success: true,
-        message: 'Chat agent deleted successfully',
+        message: `Chat agent deleted successfully (${chatsDeleteResult.deletedCount} chats also deleted)`,
         data: {
           agentId,
           llmId,
