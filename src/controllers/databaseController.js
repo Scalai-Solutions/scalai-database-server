@@ -70,7 +70,7 @@ class DatabaseController {
         model_high_priority: true,
         tool_call_strict_mode: true,
         begin_message: "",
-        general_prompt: "You are a helpful assistant.",
+        general_prompt: "You are an intelligent appointment scheduling assistant that helps users book meetings efficiently.",
         general_tools: [
           {
             type: "end_call",
@@ -81,56 +81,141 @@ class DatabaseController {
         states: [
           {
             name: "general_state",
-            description: "General state with additional information",
-            state_prompt: `Your agent_id is {{agent_id}}. You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
-
-ALWAYS transition to book_appointment_state once a slot is selected and user agrees to book meeting. For this, at the end you should ask user if user wants to book meeting at the selected slot. Do not end call without booking a meeting.
-
-You are an agent to schedule meetings. You can check availability of slot on a date. You can find earliest slot starting from a date.
-
-You should always schedule an appointment in following scenarios:
-# if user is interested to take services offered by the business. 
-# if user in seems interested in conversation ahead
-# If user asks for a callback or appointment.
-
-Steps to schedule a meeting
-# Ask user for his availability
-# if user provides an availability then transition to check_availability_state and  check its availability.
-# if user is unsure about availability then transition to nearest_slots_state and find nearest slot available.
-# Whenever user is unsure about date and slot you should transition to nearest_slots_state to get slots after today or provided date.
-# After confirming a slot from user again check its availability before transitioning to book_appointment_state. (This time do not mention that you are checking availability)
-# If available, transition to book_appointment_state
-
-YOUR ULTIMATE GOAL IS TO BOOK A MEETING
-
-TRANSITIONS
-# transition to nearest_slots_state without asking whenever required if no meeting slot is mentioned.
-# transition to check_availability_slot without asking whenever required if a meeting slot is mentioned`,
+            description: "Initial conversation and intent detection state",
+            state_prompt: `Your agent_id is {{agent_id}}. You are in Europe/Madrid timezone. 
+      Current time: {{current_time_Europe/Madrid}}
+      Current date: {{current_calendar_Europe/Madrid}}
+      
+      You are an intelligent appointment scheduling assistant. Your goal is to help users book appointments efficiently.
+      
+      INITIAL ASSESSMENT:
+      - Identify if the user wants to schedule an appointment
+      - Listen for scheduling triggers (callback requests, service interest, appointment mentions)
+      - Be proactive but not pushy
+      - If user shows interest, understand their initial preferences
+      
+      TRANSITION RULES:
+      - If user mentions a specific date/time → transition to date_clarification_state
+      - If user asks for availability without specifics → transition to preference_gathering_state
+      - If user needs help understanding options → transition to preference_gathering_state
+      - Default to preference_gathering_state if user wants to schedule but provides no details
+      
+      YOUR ULTIMATE GOAL IS TO BOOK A MEETING - be helpful and guide the conversation towards scheduling.`,
+            edges: [
+              {
+                destination_state_name: "preference_gathering_state",
+                description: "User expresses interest in scheduling but provides no specific preferences"
+              },
+              {
+                destination_state_name: "date_clarification_state",
+                description: "User mentions a specific date, time, or day of week that needs clarification"
+              }
+            ]
+          },
+          {
+            name: "preference_gathering_state",
+            description: "Collect user's scheduling preferences intelligently",
+            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
+      Current time: {{current_time_Europe/Madrid}}
+      
+      Gather user's scheduling preferences intelligently:
+      
+      QUESTIONS TO ASK (choose relevant ones based on context):
+      1. "Do you have any preferred days or times in mind?"
+      2. "Are you looking for something this week, next week, or later?"
+      3. "Do you prefer mornings (8am-12pm), afternoons (12pm-5pm), or evenings (5pm-8pm)?"
+      4. "Are there any days that don't work for you?"
+      5. "How urgent is this appointment - do you need something as soon as possible?"
+      
+      INTELLIGENCE RULES:
+      - If user says a weekday (e.g., "Friday") → Note it and transition to date_clarification_state
+      - If user says "next week" → Calculate actual date range (next Monday to Sunday)
+      - If user says "ASAP" or "earliest available" → Note urgency and search from today
+      - If user gives a date range → Note both start and end dates
+      - Store preferences in context for later use
+      
+      TRANSITION RULES:
+      - Specific date/time mentioned → date_clarification_state
+      - General preferences gathered (or user wants to see what's available) → intelligent_search_state
+      - User is vague and wants to see all options → intelligent_search_state`,
+            edges: [
+              {
+                destination_state_name: "intelligent_search_state",
+                description: "Preferences gathered or user wants to see available options"
+              },
+              {
+                destination_state_name: "date_clarification_state",
+                description: "User provides specific date/time during preference gathering"
+              }
+            ]
+          },
+          {
+            name: "date_clarification_state",
+            description: "Disambiguate and validate date/time requests",
+            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
+      Current time: {{current_time_Europe/Madrid}}
+      You are in Europe/Madrid timezone.
+      
+      CLARIFICATION LOGIC for ambiguous dates:
+      
+      For weekday mentions (Monday, Tuesday, etc.):
+      - Calculate if it's this week or next week
+      - Ask: "Do you mean this [Day] ([specific date]) or next [Day] ([specific date])?"
+      - Example: If today is Wednesday and user says "Friday", clarify "this Friday November 22nd or next Friday November 29th?"
+      
+      For relative dates:
+      - "Tomorrow" → Calculate and confirm exact date
+      - "Next week" → Clarify the date range (next Monday to Sunday)
+      - "In 2 weeks" → Calculate and confirm exact date
+      - "End of month" → Calculate last days of current month
+      
+      IMPORTANT:
+      - Always confirm the interpreted date with user
+      - Check that date is not in the past
+      - Be explicit about dates to avoid confusion
+      - Store clarified date/time for next state
+      
+      TRANSITION RULES:
+      - If specific time slot is clarified (date + time) → check_availability_state
+      - If only date is clarified (no specific time) → intelligent_search_state
+      - If date range is clarified → intelligent_search_state`,
             edges: [
               {
                 destination_state_name: "check_availability_state",
-                description: "Transition to check appointment availability. Or when user wants to book an appointment and has a specific time in mind."
+                description: "Specific date and time slot has been clarified and confirmed"
               },
               {
-                destination_state_name: "nearest_slots_state",
-                description: "Transition to find nearest available slots. Or When user wants to book an appointment but doesn't have a specific time in mind."
+                destination_state_name: "intelligent_search_state",
+                description: "Date clarified but no specific time, need to search for slots"
               }
             ]
           },
           {
             name: "check_availability_state",
-            description: "State for checking appointment availability",
-            state_prompt: `Do not ask to proceed before calling check_availability function. Do it whenever required
-
-You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
-
-Check availability for a slot using check_availability function.
-Specifications for check_availability function
-# send payload time in Europe/Madrid timezone
-
-
-
-ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
+            description: "Verify if a specific slot is available",
+            state_prompt: `You are in Europe/Madrid timezone.
+      Current time: {{current_time_Europe/Madrid}}
+      Current date: {{current_calendar_Europe/Madrid}}
+      
+      Check availability for the specific slot requested using check_availability function.
+      
+      FUNCTION USAGE:
+      - Use check_availability with the exact date and time the user requested
+      - Date format: YYYY-MM-DD
+      - Time format: HH:mm (24-hour)
+      - All times must be in Europe/Madrid timezone
+      
+      RESPONSE HANDLING:
+      If slot is AVAILABLE:
+      - Confirm: "Great! That slot on [day], [date] at [time] is available."
+      - Transition to slot_confirmation_state
+      
+      If slot is NOT AVAILABLE:
+      - Respond: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
+      - Store the unavailable slot details for context
+      - Transition to fallback_search_state to find alternatives
+      
+      Do not ask to proceed before calling the function - just check immediately.`,
             tools: [
               {
                 type: "custom",
@@ -163,22 +248,56 @@ ALWAYS TRANSITION TO BOOK_APPOINTMENT_STATE AFTER THIS STATE`,
             ],
             edges: [
               {
-                destination_state_name: "book_appointment_state",
-                description: "If the slot checked is available and user agrees to proceed further on booking meet."
+                destination_state_name: "slot_confirmation_state",
+                description: "The requested slot is available"
+              },
+              {
+                destination_state_name: "fallback_search_state",
+                description: "The requested slot is not available, need to find alternatives"
               }
             ]
           },
           {
-            name: "nearest_slots_state",
-            description: "State for finding nearest available slots",
-            state_prompt: `You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
-
-Use nearest_available_slots function to find available slots. It responds with available slots in 30 days range from start date.
-So if no slots found in 30 days range, extend startDate by 30 days unless you find a slot.
-
-After user agrees to book appointment for a slot, then only transition to book_appointment_state, otherwise do not.
-
-DO NOT MENTION FUNCTION nearest_available_slots NAME ANYTIME DURING THE CONVERSATION`,
+            name: "intelligent_search_state",
+            description: "Smart search for available slots based on preferences",
+            state_prompt: `You are in Europe/Madrid timezone.
+      Current time: {{current_time_Europe/Madrid}}
+      Current date: {{current_calendar_Europe/Madrid}}
+      
+      Perform intelligent slot search using nearest_available_slots function based on gathered preferences.
+      
+      SEARCH STRATEGY:
+      
+      1. For SPECIFIC DAY requests (e.g., "this Friday"):
+         - Start search from that specific date
+         - If no slots found, inform user and search nearby days (day before, day after, week later)
+      
+      2. For DATE RANGE requests:
+         - Start from beginning of range
+         - Search in chunks (function returns 30 days of data)
+         - If range is longer than 30 days, you may need multiple searches
+      
+      3. For ASAP/URGENT requests:
+         - Start from today's date
+         - Find the earliest available slots
+      
+      4. For TIME PREFERENCE requests (morning/afternoon/evening):
+         - Search for slots and mentally filter based on time preference
+         - Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm
+      
+      PROGRESSIVE SEARCH:
+      - Initial search: Use startDate based on user preference
+      - If no results: Extend search by 30 days (call function again with new startDate)
+      - Maximum 3 searches (90 days total) before suggesting user call directly
+      
+      IMPORTANT: 
+      - NEVER mention the function name "nearest_available_slots" to the user
+      - Present results naturally: "I found these available times..." not "The function returned..."
+      - Group and organize results intelligently before presenting
+      
+      TRANSITION:
+      - If slots found → slot_selection_state
+      - If no slots found after searching → fallback_search_state`,
             tools: [
               {
                 type: "custom",
@@ -186,7 +305,7 @@ DO NOT MENTION FUNCTION nearest_available_slots NAME ANYTIME DURING THE CONVERSA
                 url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Find the nearest available appointment slots",
+                description: "Find the nearest available appointment slots within 30 days from start date",
                 parameters: {
                   type: "object",
                   properties: {
@@ -205,32 +324,270 @@ DO NOT MENTION FUNCTION nearest_available_slots NAME ANYTIME DURING THE CONVERSA
                   },
                   required: ["startDate"]
                 },
-                execution_message_description: "Finding nearest available time slots",
+                execution_message_description: "Finding available time slots for you",
                 timeout_ms: 120000
               }
             ],
             edges: [
               {
-                destination_state_name: "book_appointment_state",
-                description: "If user selects a slot to book meeting or agrees to proceed further on booking meet."
+                destination_state_name: "slot_selection_state",
+                description: "Available slots found, present them to user for selection"
+              },
+              {
+                destination_state_name: "fallback_search_state",
+                description: "No slots found in initial search, need to expand search parameters"
               }
             ]
           },
           {
-            name: "book_appointment_state",
-            description: "State for booking appointments",
-            state_prompt: `You are in Europe/Madrid timezone. Current time in Europe/Madrid is {{current_time_Europe/Madrid}} and current calendar date in Europe/Madrid is {{current_calendar_Europe/Madrid}}
-
-Remember, if entered this state, book_appointment function has to be called at completion. 
-
-- Collect name of user. Ask to spell it to understand properly. Repeat it letter by letter to confirm. be fluent like A....S....H....O....K for ashok. Speak like a normal conversation, no dashes and all
-- Collect email of user. Ask to spell it to understand properly. Repeat it letter by letter to confirm. Repeat it letter by letter to confirm. be fluent like A....S....H....O....K for ashok. Speak like a normal conversation, no dashes and all
-- Collect phone number. Repeat it digit by digit to confirm. 
-
-After appointment is booked:
-## set appointment_booked variable to be true.
-## set appointment_description to be a short description of all about appointment booked
-## set appointment_id equal to id received back in response from book_appointment function.`,
+            name: "slot_selection_state",
+            description: "Help user choose from available slots",
+            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
+      Current time: {{current_time_Europe/Madrid}}
+      
+      Present available slots intelligently to help user make a selection.
+      
+      PRESENTATION STRATEGY:
+      
+      If 1-3 slots available:
+      - List all options clearly: "I have [day, date at time], [day, date at time], and [day, date at time]. Which works best for you?"
+      
+      If 4-8 slots available:
+      - Group by day if multiple days
+      - "I have several options: On [day] I have [times], on [day] I have [times]..."
+      - "Would you like to hear all options or focus on a specific day?"
+      
+      If many slots (9+):
+      - Prioritize based on any stated preferences
+      - "I have many slots available. The earliest is [slot]. I also have options on [preferred days if mentioned]."
+      - "Would you like me to list all times or focus on specific days?"
+      
+      USER RESPONSE HANDLING:
+      - If user selects a specific slot → Note selection and transition to slot_confirmation_state
+      - If user wants different options → Ask what they'd prefer and transition back to intelligent_search_state
+      - If user is unsure → Ask clarifying questions: "Do you prefer morning or afternoon?" 
+      
+      REMEMBER:
+      - Be conversational and helpful
+      - Store the selected slot details for the next state
+      - If user mentions a slot not in your list, transition to check_availability_state to verify it`,
+            edges: [
+              {
+                destination_state_name: "slot_confirmation_state",
+                description: "User has selected a specific slot from the options"
+              },
+              {
+                destination_state_name: "intelligent_search_state",
+                description: "User wants to see different options or change search parameters"
+              },
+              {
+                destination_state_name: "check_availability_state",
+                description: "User mentions a specific slot not in the presented options"
+              }
+            ]
+          },
+          {
+            name: "fallback_search_state",
+            description: "Handle cases when initial searches fail or slots unavailable",
+            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
+      Current time: {{current_time_Europe/Madrid}}
+      
+      Handle situations when requested slots are not available or initial search found no results.
+      
+      FALLBACK STRATEGIES based on context:
+      
+      1. If SPECIFIC SLOT was unavailable:
+         - "That exact time isn't available, but let me find the closest alternatives."
+         - Search same day different times
+         - Search adjacent days same time
+         - Search within +/- 3 days of requested date
+      
+      2. If SPECIFIC DAY had no slots:
+         - "I don't have any openings on [requested day], but let me check nearby days."
+         - Check day before and day after
+         - Check same day next week
+         - Expand to +/- 1 week if needed
+      
+      3. If NO SLOTS found in date range:
+         - "I haven't found availability in that timeframe. Let me expand the search."
+         - Extend search by 30 days forward
+         - Can search up to 90 days total (3 iterations)
+      
+      SEARCH EXPANSION using nearest_available_slots:
+      - Call with progressively wider date ranges
+      - Iteration 1: Original request + nearby days
+      - Iteration 2: Extend by 2 weeks
+      - Iteration 3: Extend by 30 days
+      - If still nothing after 90 days, apologize and suggest calling directly
+      
+      COMMUNICATION:
+      - Always explain what you're doing
+      - "I couldn't find slots on Friday, but Saturday has several openings"
+      - "The closest available to your 2pm request is 3pm on the same day"
+      - Never mention technical details or function names
+      
+      TRANSITION:
+      - Slots found → slot_selection_state
+      - No slots after maximum search → apologize and offer phone contact
+      - User accepts alternative → slot_confirmation_state`,
+            tools: [
+              {
+                type: "custom",
+                name: "nearest_available_slots",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
+                speak_during_execution: false,
+                speak_after_execution: true,
+                description: "Find the nearest available appointment slots within 30 days from start date",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    startDate: {
+                      type: "string",
+                      description: "Starting date to search from (YYYY-MM-DD)"
+                    },
+                    count: {
+                      type: "number",
+                      description: "Number of available slots to return (default: 5)"
+                    },
+                    durationMinutes: {
+                      type: "number",
+                      description: "Duration of each slot in minutes (default: 60)"
+                    }
+                  },
+                  required: ["startDate"]
+                },
+                execution_message_description: "Searching for alternative time slots",
+                timeout_ms: 120000
+              }
+            ],
+            edges: [
+              {
+                destination_state_name: "slot_selection_state",
+                description: "Alternative slots found, present them to user"
+              },
+              {
+                destination_state_name: "slot_confirmation_state",
+                description: "User accepts a suggested alternative slot"
+              }
+            ]
+          },
+          {
+            name: "slot_confirmation_state",
+            description: "Confirm slot selection before booking",
+            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
+      Current time: {{current_time_Europe/Madrid}}
+      
+      Confirm the selected slot with the user before proceeding to book.
+      
+      CONFIRMATION SCRIPT:
+      "Perfect! Just to confirm, you'd like to book an appointment on [Day], [Date] at [Time]. Is that correct?"
+      
+      IMPORTANT DOUBLE-CHECK:
+      After user confirms, silently call check_availability one more time to ensure slot is still available.
+      - Don't mention you're checking again
+      - Just say something like "Let me set that up for you" while checking
+      
+      RESPONSE HANDLING:
+      
+      If user confirms AND slot still available:
+      - "Excellent! Let me get your details to complete the booking."
+      - Transition to booking_details_state
+      
+      If user wants to change:
+      - "No problem, let me show you other options."
+      - Transition back to intelligent_search_state
+      
+      If slot no longer available (rare but possible):
+      - "I apologize, but that slot just became unavailable. Let me find you the next best option."
+      - Transition to fallback_search_state
+      
+      Store confirmed slot details for booking.`,
+            tools: [
+              {
+                type: "custom",
+                name: "check_availability",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/check-availability",
+                speak_during_execution: false,
+                speak_after_execution: false,
+                description: "Silently double-check if the slot is still available",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    date: {
+                      type: "string",
+                      description: "Date in YYYY-MM-DD format"
+                    },
+                    startTime: {
+                      type: "string",
+                      description: "Start time in HH:mm format (24-hour)"
+                    },
+                    endTime: {
+                      type: "string",
+                      description: "End time in HH:mm format (24-hour)"
+                    }
+                  },
+                  required: ["date", "startTime", "endTime"]
+                },
+                execution_message_description: "Setting that up for you",
+                timeout_ms: 120000
+              }
+            ],
+            edges: [
+              {
+                destination_state_name: "booking_details_state",
+                description: "User confirmed and slot is still available"
+              },
+              {
+                destination_state_name: "intelligent_search_state",
+                description: "User wants to change the selected slot"
+              },
+              {
+                destination_state_name: "fallback_search_state",
+                description: "Slot is no longer available, need alternatives"
+              }
+            ]
+          },
+          {
+            name: "booking_details_state",
+            description: "Collect user details and complete booking",
+            state_prompt: `You are in Europe/Madrid timezone.
+      Current time: {{current_time_Europe/Madrid}}
+      Current date: {{current_calendar_Europe/Madrid}}
+      
+      IMPORTANT: You MUST call book_appointment function once all details are collected.
+      
+      Collect user details thoroughly and accurately:
+      
+      1. NAME COLLECTION:
+         - "May I have your full name please?"
+         - "Could you spell that for me?"
+         - Repeat back: "Let me confirm - that's [SPELL LETTER BY LETTER: A... S... H... O... K]. Is that correct?"
+         - Speak naturally without dashes, just pause between letters
+      
+      2. EMAIL COLLECTION:
+         - "What's the best email address to send your confirmation to?"
+         - "Let me spell that back: [SPELL EMAIL COMPLETELY]"
+         - For common domains say: "at gmail dot com" or "at outlook dot com"
+         - Confirm: "So that's [full email]. Is that correct?"
+      
+      3. PHONE COLLECTION:
+         - "And could I have a phone number to reach you?"
+         - Repeat: "That's [SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Correct?"
+      
+      BOOKING EXECUTION:
+      - Once all details are confirmed, call book_appointment function
+      - Use the previously confirmed date and time slot
+      - Include a clear meeting title and description
+      
+      AFTER BOOKING SUCCESS:
+      - Set appointment_booked variable to true
+      - Set appointment_description with summary
+      - Store appointment_id from response
+      - Confirm: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
+      - End with: "Is there anything else I can help you with today?"
+      
+      ERROR HANDLING:
+      If booking fails, transition to error_recovery_state.`,
             tools: [
               {
                 type: "custom",
@@ -238,7 +595,7 @@ After appointment is booked:
                 url: "https://placeholder-will-be-updated-after-agent-creation.com/book-appointment",
                 speak_during_execution: false,
                 speak_after_execution: true,
-                description: "Book an appointment at a specific time slot",
+                description: "Book an appointment at the confirmed time slot",
                 parameters: {
                   type: "object",
                   properties: {
@@ -281,19 +638,90 @@ After appointment is booked:
                   },
                   required: ["date", "startTime", "endTime", "title"]
                 },
-                execution_message_description: "Booking the appointment",
+                execution_message_description: "Booking your appointment",
                 timeout_ms: 120000
               }
             ],
-            edges: []
+            edges: [
+              {
+                destination_state_name: "error_recovery_state",
+                description: "Booking failed, need to handle error"
+              }
+            ]
+          },
+          {
+            name: "error_recovery_state",
+            description: "Handle errors gracefully and recover",
+            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
+      Current time: {{current_time_Europe/Madrid}}
+      
+      Handle any errors that occur during the booking process gracefully.
+      
+      ERROR TYPES AND RESPONSES:
+      
+      1. BOOKING FAILURE:
+         - "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
+         - Transition back to intelligent_search_state with saved preferences
+      
+      2. SYSTEM UNAVAILABLE:
+         - "I'm having trouble accessing the booking system right now. Could you please try again in a few moments, or feel free to call us directly at [provide phone if available]."
+         - Ask if they'd like to try again
+      
+      3. INVALID DATA:
+         - "I think there might have been an issue with the information. Let me collect that again."
+         - Re-collect only the problematic information
+         - Return to booking_details_state
+      
+      4. NETWORK/TIMEOUT:
+         - "The system is taking longer than expected. Let me try once more."
+         - Retry once, then provide alternative contact method if fails
+      
+      RECOVERY ACTIONS:
+      - Always maintain positive, helpful tone
+      - Preserve all previously collected information
+      - Offer alternatives (different slot, call directly, try again)
+      - Never leave user without a path forward
+      
+      TRANSITIONS:
+      - For slot-related issues → intelligent_search_state
+      - For data collection issues → booking_details_state
+      - For temporary issues → retry current action once`,
+            edges: [
+              {
+                destination_state_name: "intelligent_search_state",
+                description: "Need to find a new slot after booking failure"
+              },
+              {
+                destination_state_name: "booking_details_state",
+                description: "Need to re-collect information"
+              }
+            ]
           }
         ],
         starting_state: "general_state",
         default_dynamic_variables: {
-          agent_id: ""
+          agent_id: "",
+          user_preference_day: null,
+          user_preference_time: null,
+          specific_date_requested: null,
+          date_range_start: null,
+          date_range_end: null,
+          selected_slot: null,
+          selected_date: null,
+          selected_time: null,
+          slot_confirmed: false,
+          user_name: null,
+          user_email: null,
+          user_phone: null,
+          appointment_id: null,
+          appointment_booked: false,
+          appointment_description: null,
+          search_iterations: 0,
+          failed_slot_request: null
         },
         knowledge_base_ids: []
       };
+      
 
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
