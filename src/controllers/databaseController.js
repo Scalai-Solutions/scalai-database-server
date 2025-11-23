@@ -202,22 +202,24 @@ class DatabaseController {
       Check availability for the specific slot requested using check_availability function.
       
       FUNCTION USAGE:
-      - Use check_availability with the exact date and time the user requested
+      - IMMEDIATELY call check_availability with the exact date and time the user requested
       - Date format: YYYY-MM-DD
       - Time format: HH:mm (24-hour)
       - All times must be in Europe/Madrid timezone
+      - Do NOT ask permission - just call the function immediately
       
       RESPONSE HANDLING:
+      After receiving function result, respond AND transition in the SAME turn:
+      
       If slot is AVAILABLE:
-      - Confirm: "Great! That slot on [day], [date] at [time] is available."
-      - Transition to slot_confirmation_state
+      - Say: "Great! That slot on [day], [date] at [time] is available."
+      - IMMEDIATELY transition to slot_confirmation_state in the same response
       
       If slot is NOT AVAILABLE:
-      - Respond: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
-      - Store the unavailable slot details for context
-      - Transition to fallback_search_state to find alternatives
+      - Say: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
+      - IMMEDIATELY transition to fallback_search_state in the same response
       
-      Do not ask to proceed before calling the function - just check immediately.`,
+      CRITICAL: Always transition immediately after receiving the function result. Never wait for more user input.`,
             tools: [
               {
                 type: "custom",
@@ -296,9 +298,10 @@ class DatabaseController {
       - NEVER mention the function name "nearest_available_slots" to the user
       - Present results naturally: "I found these available times..." not "The function returned..."
       - Group and organize results intelligently before presenting
+      - After presenting slots, WAIT for user to select one - don't book yet
       
       TRANSITION:
-      - If slots found → slot_selection_state
+      - After presenting slots and receiving function results → IMMEDIATELY transition to slot_selection_state
       - If no slots found after searching → fallback_search_state`,
             tools: [
               {
@@ -365,9 +368,14 @@ class DatabaseController {
       - "Would you like me to list all times or focus on specific days?"
       
       USER RESPONSE HANDLING:
-      - If user selects a specific slot → Note selection and transition to slot_confirmation_state
+      - If user selects a specific slot → Note the selection and transition to slot_confirmation_state to confirm
       - If user wants different options → Ask what they'd prefer and transition back to intelligent_search_state
       - If user is unsure → Ask clarifying questions: "Do you prefer morning or afternoon?" 
+      
+      IMPORTANT:
+      - DO NOT say "I will book" or "Let me book" yet - just acknowledge their selection
+      - Say something like: "Great choice! Let me confirm that with you..." then transition to slot_confirmation_state
+      - The actual booking happens later after confirmation
       
       REMEMBER:
       - Be conversational and helpful
@@ -484,26 +492,19 @@ class DatabaseController {
       CONFIRMATION SCRIPT:
       "Perfect! Just to confirm, you'd like to book an appointment on [Day], [Date] at [Time]. Is that correct?"
       
-      IMPORTANT DOUBLE-CHECK:
-      After user confirms, silently call check_availability one more time to ensure slot is still available.
-      - Don't mention you're checking again
-      - Just say something like "Let me set that up for you" while checking
+      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", etc.):
+      1. IMMEDIATELY call check_availability function
+      2. After receiving the function result:
+         - If available=true: Say ONLY "Excellent! Let me get your details." and IMMEDIATELY transition to booking_details_state in the SAME response WITHOUT waiting for user input
+         - If available=false: Say "That slot just became unavailable. Let me find alternatives." and transition to fallback_search_state
       
-      RESPONSE HANDLING:
+      CRITICAL: After check_availability returns available=true, you MUST transition to booking_details_state immediately. DO NOT ask another question or wait for user response.
       
-      If user confirms AND slot still available:
-      - "Excellent! Let me get your details to complete the booking."
-      - Transition to booking_details_state
-      
-      If user wants to change:
+      If user wants to change BEFORE confirming:
       - "No problem, let me show you other options."
       - Transition back to intelligent_search_state
       
-      If slot no longer available (rare but possible):
-      - "I apologize, but that slot just became unavailable. Let me find you the next best option."
-      - Transition to fallback_search_state
-      
-      Store confirmed slot details for booking.`,
+      Store confirmed slot details (date, startTime, endTime) in dynamic variables for booking.`,
             tools: [
               {
                 type: "custom",
@@ -556,42 +557,41 @@ class DatabaseController {
       Current time: {{current_time_Europe/Madrid}}
       Current date: {{current_calendar_Europe/Madrid}}
       
-      IMPORTANT: You MUST call book_appointment function once all details are collected.
+      You are now in the booking phase. Your goal is to collect details and complete the booking.
       
-      Collect user details thoroughly and accurately:
+      STEP-BY-STEP PROCESS:
       
       1. NAME COLLECTION:
-         - "May I have your full name please?"
-         - "Could you spell that for me?"
-         - Repeat back: "Let me confirm - that's [SPELL LETTER BY LETTER: A... S... H... O... K]. Is that correct?"
+         - Ask: "May I have your full name please?"
+         - Get spelling if unclear: "Could you spell that for me?"
+         - Confirm: "Let me confirm - that's [SPELL LETTER BY LETTER: A... S... H... O... K]. Is that correct?"
          - Speak naturally without dashes, just pause between letters
       
       2. EMAIL COLLECTION:
-         - "What's the best email address to send your confirmation to?"
-         - "Let me spell that back: [SPELL EMAIL COMPLETELY]"
+         - Ask: "What's the best email address to send your confirmation to?"
+         - Confirm: "Let me spell that back: [SPELL EMAIL COMPLETELY]"
          - For common domains say: "at gmail dot com" or "at outlook dot com"
-         - Confirm: "So that's [full email]. Is that correct?"
       
       3. PHONE COLLECTION:
-         - "And could I have a phone number to reach you?"
-         - Repeat: "That's [SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Correct?"
+         - Ask: "And could I have a phone number to reach you?"
+         - Confirm: "That's [SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Correct?"
       
-      BOOKING EXECUTION:
-      - Once all details are confirmed, call book_appointment function
-      - Use the previously confirmed date and time slot
-      - Include a clear meeting title and description
+      4. BOOKING EXECUTION:
+         - Once ALL THREE details are confirmed (name, email, phone), IMMEDIATELY call book_appointment function
+         - Use the previously confirmed date and time slot
+         - Include meeting title like "Appointment with [customer name]"
       
-      AFTER BOOKING SUCCESS:
-      - Set appointment_booked variable to true
-      - Set appointment_description with summary
-      - Store appointment_id from response
-      - Confirm: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
-      - Ask: "Is there anything else I can help you with today?"
-      - If user says no or wants to end call, use end_call tool
-      - If user wants another appointment, transition back to preference_gathering_state
+      5. AFTER BOOKING SUCCESS:
+         - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
+         - Say: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
+         - Ask: "Is there anything else I can help you with today?"
+         - If user says no → use end_call tool
+         - If user wants another appointment → transition to preference_gathering_state
       
       ERROR HANDLING:
-      If booking fails, transition to error_recovery_state.`,
+      - If booking fails → transition to error_recovery_state
+      
+      CRITICAL: Move through details collection efficiently. Once you have all 3 details, call book_appointment IMMEDIATELY.`,
             tools: [
               {
                 type: "custom",
@@ -3812,22 +3812,24 @@ class DatabaseController {
       Check availability for the specific slot requested using check_availability function.
       
       FUNCTION USAGE:
-      - Use check_availability with the exact date and time the user requested
+      - IMMEDIATELY call check_availability with the exact date and time the user requested
       - Date format: YYYY-MM-DD
       - Time format: HH:mm (24-hour)
       - All times must be in Europe/Madrid timezone
+      - Do NOT ask permission - just call the function immediately
       
       RESPONSE HANDLING:
+      After receiving function result, respond AND transition in the SAME turn:
+      
       If slot is AVAILABLE:
-      - Confirm: "Great! That slot on [day], [date] at [time] is available."
-      - Transition to slot_confirmation_state
+      - Say: "Great! That slot on [day], [date] at [time] is available."
+      - IMMEDIATELY transition to slot_confirmation_state in the same response
       
       If slot is NOT AVAILABLE:
-      - Respond: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
-      - Store the unavailable slot details for context
-      - Transition to fallback_search_state to find alternatives
+      - Say: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
+      - IMMEDIATELY transition to fallback_search_state in the same response
       
-      Do not ask to proceed before calling the function - just check immediately.`,
+      CRITICAL: Always transition immediately after receiving the function result. Never wait for more user input.`,
             tools: [
               {
                 type: "custom",
@@ -3906,9 +3908,10 @@ class DatabaseController {
       - NEVER mention the function name "nearest_available_slots" to the user
       - Present results naturally: "I found these available times..." not "The function returned..."
       - Group and organize results intelligently before presenting
+      - After presenting slots, WAIT for user to select one - don't book yet
       
       TRANSITION:
-      - If slots found → slot_selection_state
+      - After presenting slots and receiving function results → IMMEDIATELY transition to slot_selection_state
       - If no slots found after searching → fallback_search_state`,
             tools: [
               {
@@ -3975,9 +3978,14 @@ class DatabaseController {
       - "Would you like me to list all times or focus on specific days?"
       
       USER RESPONSE HANDLING:
-      - If user selects a specific slot → Note selection and transition to slot_confirmation_state
+      - If user selects a specific slot → Note the selection and transition to slot_confirmation_state to confirm
       - If user wants different options → Ask what they'd prefer and transition back to intelligent_search_state
       - If user is unsure → Ask clarifying questions: "Do you prefer morning or afternoon?" 
+      
+      IMPORTANT:
+      - DO NOT say "I will book" or "Let me book" yet - just acknowledge their selection
+      - Say something like: "Great choice! Let me confirm that with you..." then transition to slot_confirmation_state
+      - The actual booking happens later after confirmation
       
       REMEMBER:
       - Be conversational and helpful
@@ -4094,26 +4102,19 @@ class DatabaseController {
       CONFIRMATION SCRIPT:
       "Perfect! Just to confirm, you'd like to book an appointment on [Day], [Date] at [Time]. Is that correct?"
       
-      IMPORTANT DOUBLE-CHECK:
-      After user confirms, silently call check_availability one more time to ensure slot is still available.
-      - Don't mention you're checking again
-      - Just say something like "Let me set that up for you" while checking
+      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", etc.):
+      1. IMMEDIATELY call check_availability function
+      2. After receiving the function result:
+         - If available=true: Say ONLY "Excellent! Let me get your details." and IMMEDIATELY transition to booking_details_state in the SAME response WITHOUT waiting for user input
+         - If available=false: Say "That slot just became unavailable. Let me find alternatives." and transition to fallback_search_state
       
-      RESPONSE HANDLING:
+      CRITICAL: After check_availability returns available=true, you MUST transition to booking_details_state immediately. DO NOT ask another question or wait for user response.
       
-      If user confirms AND slot still available:
-      - "Excellent! Let me get your details to complete the booking."
-      - Transition to booking_details_state
-      
-      If user wants to change:
+      If user wants to change BEFORE confirming:
       - "No problem, let me show you other options."
       - Transition back to intelligent_search_state
       
-      If slot no longer available (rare but possible):
-      - "I apologize, but that slot just became unavailable. Let me find you the next best option."
-      - Transition to fallback_search_state
-      
-      Store confirmed slot details for booking.`,
+      Store confirmed slot details (date, startTime, endTime) in dynamic variables for booking.`,
             tools: [
               {
                 type: "custom",
@@ -4166,42 +4167,41 @@ class DatabaseController {
       Current time: {{current_time_Europe/Madrid}}
       Current date: {{current_calendar_Europe/Madrid}}
       
-      IMPORTANT: You MUST call book_appointment function once all details are collected.
+      You are now in the booking phase. Your goal is to collect details and complete the booking.
       
-      Collect user details thoroughly and accurately:
+      STEP-BY-STEP PROCESS:
       
       1. NAME COLLECTION:
-         - "May I have your full name please?"
-         - "Could you spell that for me?"
-         - Repeat back: "Let me confirm - that's [SPELL LETTER BY LETTER: A... S... H... O... K]. Is that correct?"
+         - Ask: "May I have your full name please?"
+         - Get spelling if unclear: "Could you spell that for me?"
+         - Confirm: "Let me confirm - that's [SPELL LETTER BY LETTER: A... S... H... O... K]. Is that correct?"
          - Speak naturally without dashes, just pause between letters
       
       2. EMAIL COLLECTION:
-         - "What's the best email address to send your confirmation to?"
-         - "Let me spell that back: [SPELL EMAIL COMPLETELY]"
+         - Ask: "What's the best email address to send your confirmation to?"
+         - Confirm: "Let me spell that back: [SPELL EMAIL COMPLETELY]"
          - For common domains say: "at gmail dot com" or "at outlook dot com"
-         - Confirm: "So that's [full email]. Is that correct?"
       
       3. PHONE COLLECTION:
-         - "And could I have a phone number to reach you?"
-         - Repeat: "That's [SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Correct?"
+         - Ask: "And could I have a phone number to reach you?"
+         - Confirm: "That's [SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Correct?"
       
-      BOOKING EXECUTION:
-      - Once all details are confirmed, call book_appointment function
-      - Use the previously confirmed date and time slot
-      - Include a clear meeting title and description
+      4. BOOKING EXECUTION:
+         - Once ALL THREE details are confirmed (name, email, phone), IMMEDIATELY call book_appointment function
+         - Use the previously confirmed date and time slot
+         - Include meeting title like "Appointment with [customer name]"
       
-      AFTER BOOKING SUCCESS:
-      - Set appointment_booked variable to true
-      - Set appointment_description with summary
-      - Store appointment_id from response
-      - Confirm: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
-      - Ask: "Is there anything else I can help you with today?"
-      - If user says no or wants to end call, use end_call tool
-      - If user wants another appointment, transition back to preference_gathering_state
+      5. AFTER BOOKING SUCCESS:
+         - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
+         - Say: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
+         - Ask: "Is there anything else I can help you with today?"
+         - If user says no → use end_call tool
+         - If user wants another appointment → transition to preference_gathering_state
       
       ERROR HANDLING:
-      If booking fails, transition to error_recovery_state.`,
+      - If booking fails → transition to error_recovery_state
+      
+      CRITICAL: Move through details collection efficiently. Once you have all 3 details, call book_appointment IMMEDIATELY.`,
             tools: [
               {
                 type: "custom",
