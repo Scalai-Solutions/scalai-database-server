@@ -1404,7 +1404,100 @@ class DatabaseController {
         });
       }
 
-      // Step 7: Delete all calls associated with this agent
+      // Step 7: Unassign phone numbers from this agent (both inbound and outbound)
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      let phoneNumbersUnassigned = 0;
+      
+      try {
+        // Find all phone numbers assigned to this agent
+        const assignedPhoneNumbers = await phoneNumbersCollection.find({
+          subaccountId: subaccountId,
+          $or: [
+            { inbound_agent_id: agentId },
+            { outbound_agent_id: agentId }
+          ]
+        }).toArray();
+
+        Logger.info('Found phone numbers assigned to agent', {
+          operationId,
+          agentId,
+          phoneCount: assignedPhoneNumbers.length,
+          phoneNumbers: assignedPhoneNumbers.map(p => p.phone_number)
+        });
+
+        // Unassign each phone number in both Retell and MongoDB
+        for (const phoneDoc of assignedPhoneNumbers) {
+          try {
+            const updateData = {};
+            if (phoneDoc.inbound_agent_id === agentId) {
+              updateData.inbound_agent_id = null;
+            }
+            if (phoneDoc.outbound_agent_id === agentId) {
+              updateData.outbound_agent_id = null;
+            }
+
+            // Update in Retell API
+            try {
+              await retell.updatePhoneNumber(phoneDoc.phone_number, updateData);
+              Logger.info('Phone number unassigned in Retell', {
+                operationId,
+                phoneNumber: phoneDoc.phone_number,
+                updateData
+              });
+            } catch (retellError) {
+              Logger.warn('Failed to unassign phone number in Retell, continuing', {
+                operationId,
+                phoneNumber: phoneDoc.phone_number,
+                error: retellError.message
+              });
+            }
+
+            // Update in MongoDB
+            const mongoUpdate = {
+              updatedAt: new Date(),
+              last_modification_timestamp: Date.now()
+            };
+            if (updateData.inbound_agent_id !== undefined) {
+              mongoUpdate.inbound_agent_id = null;
+              mongoUpdate.inbound_agent_version = null;
+            }
+            if (updateData.outbound_agent_id !== undefined) {
+              mongoUpdate.outbound_agent_id = null;
+              mongoUpdate.outbound_agent_version = null;
+            }
+
+            await phoneNumbersCollection.updateOne(
+              { 
+                subaccountId: subaccountId,
+                phone_number: phoneDoc.phone_number 
+              },
+              { $set: mongoUpdate }
+            );
+
+            phoneNumbersUnassigned++;
+            
+            Logger.info('Phone number unassigned in MongoDB', {
+              operationId,
+              phoneNumber: phoneDoc.phone_number,
+              mongoUpdate
+            });
+          } catch (phoneError) {
+            Logger.error('Failed to unassign phone number', {
+              operationId,
+              phoneNumber: phoneDoc.phone_number,
+              error: phoneError.message
+            });
+          }
+        }
+      } catch (phoneError) {
+        Logger.warn('Failed to unassign phone numbers from agent', {
+          operationId,
+          agentId,
+          error: phoneError.message
+        });
+      }
+
+      // Step 8: Delete all calls associated with this agent
       const callsCollection = connection.db.collection('calls');
       const callsDeleteResult = await callsCollection.deleteMany({
         subaccountId: subaccountId,
@@ -1417,7 +1510,7 @@ class DatabaseController {
         deletedCallsCount: callsDeleteResult.deletedCount
       });
 
-      // Step 8: Delete all activities associated with this agent
+      // Step 9: Delete all activities associated with this agent
       let activitiesDeletedCount = 0;
       try {
         const activityDeleteResult = await ActivityService.deleteActivitiesByResource(
@@ -1440,7 +1533,7 @@ class DatabaseController {
         });
       }
 
-      // Step 9: Invalidate caches for this agent
+      // Step 10: Invalidate caches for this agent
       try {
         await redisService.invalidateAgentStats(subaccountId, agentId);
         await redisService.invalidateActivities(subaccountId);
@@ -1457,12 +1550,13 @@ class DatabaseController {
         activityType: ACTIVITY_TYPES.AGENT_DELETED,
         category: ACTIVITY_CATEGORIES.AGENT,
         userId,
-        description: `Agent "${agentDocument.name}" deleted (including ${callsDeleteResult.deletedCount} associated calls and ${activitiesDeletedCount} activities)`,
+        description: `Agent "${agentDocument.name}" deleted (including ${callsDeleteResult.deletedCount} calls, ${phoneNumbersUnassigned} phone numbers, and ${activitiesDeletedCount} activities)`,
         metadata: {
           agentId,
           agentName: agentDocument.name,
           llmId,
           deletedCallsCount: callsDeleteResult.deletedCount,
+          phoneNumbersUnassigned: phoneNumbersUnassigned,
           deletedActivitiesCount: activitiesDeletedCount
         },
         resourceId: agentId,
@@ -1474,13 +1568,14 @@ class DatabaseController {
 
       res.json({
         success: true,
-        message: `Agent deleted successfully (including ${callsDeleteResult.deletedCount} calls and ${activitiesDeletedCount} activities)`,
+        message: `Agent deleted successfully (including ${callsDeleteResult.deletedCount} calls, ${phoneNumbersUnassigned} phone numbers, and ${activitiesDeletedCount} activities)`,
         data: {
           agentId,
           llmId,
           deletedFromRetell: true,
           deletedFromDatabase: true,
           deletedCallsCount: callsDeleteResult.deletedCount,
+          phoneNumbersUnassigned: phoneNumbersUnassigned,
           deletedActivitiesCount: activitiesDeletedCount
         },
         meta: {
@@ -1831,11 +1926,11 @@ class DatabaseController {
                 else: false
               }
             },
-            // Only include valid success scores
+            // Only include valid success scores (using success_rate field)
             validSuccessScore: {
               $cond: {
-                if: { $gt: [{ $ifNull: ['$success_score', 0] }, 0] },
-                then: '$success_score',
+                if: { $gt: [{ $ifNull: ['$success_rate', 0] }, 0] },
+                then: '$success_rate',
                 else: null
               }
             }
@@ -2255,11 +2350,11 @@ class DatabaseController {
                 else: false
               }
             },
-            // Only include valid success scores
+            // Only include valid success scores (using success_rate field)
             validSuccessScore: {
               $cond: {
-                if: { $gt: [{ $ifNull: ['$success_score', 0] }, 0] },
-                then: '$success_score',
+                if: { $gt: [{ $ifNull: ['$success_rate', 0] }, 0] },
+                then: '$success_rate',
                 else: null
               }
             },
@@ -6346,7 +6441,100 @@ class DatabaseController {
         }
       }
 
-      // Step 7: Delete WhatsApp connections from MongoDB
+      // Step 7: Unassign phone numbers from this chat agent (both inbound and outbound)
+      const phoneNumbersCollection = connection.db.collection('phonenumbers');
+      let phoneNumbersUnassigned = 0;
+      
+      try {
+        // Find all phone numbers assigned to this chat agent
+        const assignedPhoneNumbers = await phoneNumbersCollection.find({
+          subaccountId: subaccountId,
+          $or: [
+            { inbound_agent_id: agentId },
+            { outbound_agent_id: agentId }
+          ]
+        }).toArray();
+
+        Logger.info('Found phone numbers assigned to chat agent', {
+          operationId,
+          agentId,
+          phoneCount: assignedPhoneNumbers.length,
+          phoneNumbers: assignedPhoneNumbers.map(p => p.phone_number)
+        });
+
+        // Unassign each phone number in both Retell and MongoDB
+        for (const phoneDoc of assignedPhoneNumbers) {
+          try {
+            const updateData = {};
+            if (phoneDoc.inbound_agent_id === agentId) {
+              updateData.inbound_agent_id = null;
+            }
+            if (phoneDoc.outbound_agent_id === agentId) {
+              updateData.outbound_agent_id = null;
+            }
+
+            // Update in Retell API
+            try {
+              await retell.updatePhoneNumber(phoneDoc.phone_number, updateData);
+              Logger.info('Phone number unassigned in Retell', {
+                operationId,
+                phoneNumber: phoneDoc.phone_number,
+                updateData
+              });
+            } catch (retellError) {
+              Logger.warn('Failed to unassign phone number in Retell, continuing', {
+                operationId,
+                phoneNumber: phoneDoc.phone_number,
+                error: retellError.message
+              });
+            }
+
+            // Update in MongoDB
+            const mongoUpdate = {
+              updatedAt: new Date(),
+              last_modification_timestamp: Date.now()
+            };
+            if (updateData.inbound_agent_id !== undefined) {
+              mongoUpdate.inbound_agent_id = null;
+              mongoUpdate.inbound_agent_version = null;
+            }
+            if (updateData.outbound_agent_id !== undefined) {
+              mongoUpdate.outbound_agent_id = null;
+              mongoUpdate.outbound_agent_version = null;
+            }
+
+            await phoneNumbersCollection.updateOne(
+              { 
+                subaccountId: subaccountId,
+                phone_number: phoneDoc.phone_number 
+              },
+              { $set: mongoUpdate }
+            );
+
+            phoneNumbersUnassigned++;
+            
+            Logger.info('Phone number unassigned in MongoDB', {
+              operationId,
+              phoneNumber: phoneDoc.phone_number,
+              mongoUpdate
+            });
+          } catch (phoneError) {
+            Logger.error('Failed to unassign phone number', {
+              operationId,
+              phoneNumber: phoneDoc.phone_number,
+              error: phoneError.message
+            });
+          }
+        }
+      } catch (phoneError) {
+        Logger.warn('Failed to unassign phone numbers from chat agent', {
+          operationId,
+          agentId,
+          error: phoneError.message
+        });
+      }
+
+      // Step 8: Delete WhatsApp connections from MongoDB
       const whatsappConnectionsCollection = connection.db.collection('whatsappconnections');
       const whatsappConnectionsDeleteResult = await whatsappConnectionsCollection.deleteMany({
         subaccountId: subaccountId,
@@ -6359,7 +6547,7 @@ class DatabaseController {
         deletedCount: whatsappConnectionsDeleteResult.deletedCount
       });
 
-      // Step 8: Delete Instagram connections from MongoDB
+      // Step 9: Delete Instagram connections from MongoDB
       const instagramConnectionsCollection = connection.db.collection('instagramconnections');
       const instagramConnectionsDeleteResult = await instagramConnectionsCollection.deleteMany({
         subaccountId: subaccountId,
@@ -6372,7 +6560,7 @@ class DatabaseController {
         deletedCount: instagramConnectionsDeleteResult.deletedCount
       });
 
-      // Step 9: Delete all chats associated with this agent
+      // Step 10: Delete all chats associated with this agent
       const chatsDeleteResult = await chatsCollection.deleteMany({ 
         agent_id: agentId,
         subaccountId: subaccountId 
@@ -6384,7 +6572,7 @@ class DatabaseController {
         deletedCount: chatsDeleteResult.deletedCount
       });
 
-      // Step 10: Delete chat agent document from MongoDB
+      // Step 11: Delete chat agent document from MongoDB
       const agentDeleteResult = await chatAgentsCollection.deleteOne({ 
         agentId: agentId,
         subaccountId: subaccountId 
@@ -6396,7 +6584,7 @@ class DatabaseController {
         deletedCount: agentDeleteResult.deletedCount
       });
 
-      // Step 10: Delete LLM document from MongoDB
+      // Step 12: Delete LLM document from MongoDB
       if (llmId) {
         const llmDeleteResult = await llmsCollection.deleteOne({ 
           llmId: llmId,
@@ -6410,7 +6598,7 @@ class DatabaseController {
       });
       }
 
-      // Step 11: Delete all activities associated with this chat agent
+      // Step 13: Delete all activities associated with this chat agent
       let activitiesDeletedCount = 0;
       try {
         const activityDeleteResult = await ActivityService.deleteActivitiesByResource(
@@ -6433,7 +6621,7 @@ class DatabaseController {
         });
       }
 
-      // Step 12: Invalidate caches for this agent and its chats
+      // Step 14: Invalidate caches for this agent and its chats
       try {
         await redisService.invalidateChatAgentStats(subaccountId, agentId);
         await redisService.invalidateChatList(subaccountId);
@@ -6445,18 +6633,19 @@ class DatabaseController {
         });
       }
 
-      // Step 13: Log activity
+      // Step 15: Log activity
       await ActivityService.logActivity({
         subaccountId,
         activityType: ACTIVITY_TYPES.CHAT_AGENT_DELETED,
         category: ACTIVITY_CATEGORIES.CHAT_AGENT,
         userId,
-        description: `Chat agent "${agentDocument.name}" deleted (including ${chatsDeleteResult.deletedCount} associated chats and ${activitiesDeletedCount} activities)`,
+        description: `Chat agent "${agentDocument.name}" deleted (including ${chatsDeleteResult.deletedCount} chats, ${phoneNumbersUnassigned} phone numbers, and ${activitiesDeletedCount} activities)`,
         metadata: {
           agentId,
           agentName: agentDocument.name,
           llmId,
           chatsDeleted: chatsDeleteResult.deletedCount,
+          phoneNumbersUnassigned: phoneNumbersUnassigned,
           whatsappDisconnected,
           instagramDisconnected,
           whatsappConnectionsDeleted: whatsappConnectionsDeleteResult.deletedCount,
@@ -6472,11 +6661,12 @@ class DatabaseController {
 
       res.json({
         success: true,
-        message: `Chat agent deleted successfully (including ${chatsDeleteResult.deletedCount} chats and ${activitiesDeletedCount} activities)`,
+        message: `Chat agent deleted successfully (including ${chatsDeleteResult.deletedCount} chats, ${phoneNumbersUnassigned} phone numbers, and ${activitiesDeletedCount} activities)`,
         data: {
           agentId,
           llmId,
           chatsDeleted: chatsDeleteResult.deletedCount,
+          phoneNumbersUnassigned: phoneNumbersUnassigned,
           activitiesDeleted: activitiesDeletedCount,
           whatsappDisconnected,
           instagramDisconnected,

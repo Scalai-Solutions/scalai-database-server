@@ -224,6 +224,37 @@ class Retell {
     }
   }
 
+  /**
+   * Delete a chat agent by ID
+   * @param {string} agentId - The chat agent ID to delete
+   * @returns {Promise<void>}
+   */
+  async deleteChatAgent(agentId) {
+    try {
+      Logger.info('Deleting chat agent', {
+        agentId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      await this.client.agent.delete(agentId);
+      
+      Logger.info('Chat agent deleted successfully', {
+        agentId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+    } catch (error) {
+      Logger.error('Failed to delete chat agent', {
+        agentId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to delete chat agent: ${error.message}`);
+    }
+  }
+
   async getAgent(agentId) {
     try {
       Logger.info('Getting agent', {
@@ -312,6 +343,45 @@ class Retell {
         error: error.message
       });
       throw new Error(`Failed to list phone numbers: ${error.message}`);
+    }
+  }
+
+  /**
+   * Update phone number assignment in Retell
+   * @param {string} phoneNumber - Phone number to update
+   * @param {Object} updateData - Update data
+   * @param {string} updateData.inbound_agent_id - Inbound agent ID (optional, can be null)
+   * @param {string} updateData.outbound_agent_id - Outbound agent ID (optional, can be null)
+   * @param {string} updateData.nickname - Nickname (optional)
+   * @returns {Promise<Object>} Updated phone number data
+   */
+  async updatePhoneNumber(phoneNumber, updateData) {
+    try {
+      Logger.info('Updating phone number', {
+        phoneNumber,
+        updateData,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const updatedPhoneNumber = await this.client.phoneNumber.update(phoneNumber, updateData);
+      
+      Logger.info('Phone number updated successfully', {
+        phoneNumber,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return updatedPhoneNumber;
+    } catch (error) {
+      Logger.error('Failed to update phone number', {
+        phoneNumber,
+        updateData,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to update phone number: ${error.message}`);
     }
   }
 
