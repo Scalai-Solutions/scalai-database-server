@@ -12,6 +12,7 @@ const ACTIVITY_TYPES = {
   
   // Chat Agent activities
   CHAT_AGENT_CREATED: 'chat_agent_created',
+  CHAT_AGENT_DELETED: 'chat_agent_deleted',
   CHAT_AGENT_ACTIVATED: 'chat_agent_activated',
   CHAT_AGENT_DEACTIVATED: 'chat_agent_deactivated',
   CHAT_AGENT_UPDATED: 'chat_agent_updated',
@@ -340,6 +341,50 @@ class ActivityService {
       });
       
       throw error;
+    }
+  }
+
+  /**
+   * Delete all activities related to a specific resource (agent or chat agent)
+   * @param {string} subaccountId - Subaccount ID
+   * @param {string} resourceId - Resource ID (agent ID or chat agent ID)
+   * @param {string} userId - User ID making the request
+   * @returns {Promise<Object>} Deletion result with count
+   */
+  static async deleteActivitiesByResource(subaccountId, resourceId, userId) {
+    try {
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId || 'system');
+      const { connection } = connectionInfo;
+      
+      const activitiesCollection = connection.db.collection('activities');
+      
+      // Delete all activities for this resource
+      const deleteResult = await activitiesCollection.deleteMany({
+        subaccountId,
+        resourceId
+      });
+      
+      Logger.info('Activities deleted for resource', {
+        subaccountId,
+        resourceId,
+        deletedCount: deleteResult.deletedCount
+      });
+      
+      return {
+        success: true,
+        deletedCount: deleteResult.deletedCount
+      };
+    } catch (error) {
+      Logger.error('Failed to delete activities for resource', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId,
+        resourceId
+      });
+      
+      // Don't throw error - activity deletion should not break the main flow
+      return { success: false, error: error.message, deletedCount: 0 };
     }
   }
 }

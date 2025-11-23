@@ -1417,11 +1417,35 @@ class DatabaseController {
         deletedCallsCount: callsDeleteResult.deletedCount
       });
 
-      // Step 8: Invalidate cache for this agent
+      // Step 8: Delete all activities associated with this agent
+      let activitiesDeletedCount = 0;
+      try {
+        const activityDeleteResult = await ActivityService.deleteActivitiesByResource(
+          subaccountId, 
+          agentId, 
+          userId
+        );
+        activitiesDeletedCount = activityDeleteResult.deletedCount || 0;
+        
+        Logger.info('Activities associated with agent deleted', {
+          operationId,
+          agentId,
+          deletedActivitiesCount: activitiesDeletedCount
+        });
+      } catch (activityError) {
+        Logger.warn('Failed to delete activities for agent', {
+          operationId,
+          agentId,
+          error: activityError.message
+        });
+      }
+
+      // Step 9: Invalidate caches for this agent
       try {
         await redisService.invalidateAgentStats(subaccountId, agentId);
+        await redisService.invalidateActivities(subaccountId);
       } catch (cacheError) {
-        Logger.warn('Failed to invalidate agent statistics cache', {
+        Logger.warn('Failed to invalidate agent and activity caches', {
           operationId,
           error: cacheError.message
         });
@@ -1433,12 +1457,13 @@ class DatabaseController {
         activityType: ACTIVITY_TYPES.AGENT_DELETED,
         category: ACTIVITY_CATEGORIES.AGENT,
         userId,
-        description: `Agent "${agentDocument.name}" deleted (including ${callsDeleteResult.deletedCount} associated calls)`,
+        description: `Agent "${agentDocument.name}" deleted (including ${callsDeleteResult.deletedCount} associated calls and ${activitiesDeletedCount} activities)`,
         metadata: {
           agentId,
           agentName: agentDocument.name,
           llmId,
-          deletedCallsCount: callsDeleteResult.deletedCount
+          deletedCallsCount: callsDeleteResult.deletedCount,
+          deletedActivitiesCount: activitiesDeletedCount
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
@@ -1449,13 +1474,14 @@ class DatabaseController {
 
       res.json({
         success: true,
-        message: `Agent and ${callsDeleteResult.deletedCount} associated call(s) deleted successfully`,
+        message: `Agent deleted successfully (including ${callsDeleteResult.deletedCount} calls and ${activitiesDeletedCount} activities)`,
         data: {
           agentId,
           llmId,
           deletedFromRetell: true,
           deletedFromDatabase: true,
-          deletedCallsCount: callsDeleteResult.deletedCount
+          deletedCallsCount: callsDeleteResult.deletedCount,
+          deletedActivitiesCount: activitiesDeletedCount
         },
         meta: {
           operationId,
@@ -6384,24 +6410,48 @@ class DatabaseController {
       });
       }
 
-      // Step 11: Invalidate cache for this agent and its chats
+      // Step 11: Delete all activities associated with this chat agent
+      let activitiesDeletedCount = 0;
+      try {
+        const activityDeleteResult = await ActivityService.deleteActivitiesByResource(
+          subaccountId, 
+          agentId, 
+          userId
+        );
+        activitiesDeletedCount = activityDeleteResult.deletedCount || 0;
+        
+        Logger.info('Activities associated with chat agent deleted', {
+          operationId,
+          agentId,
+          deletedActivitiesCount: activitiesDeletedCount
+        });
+      } catch (activityError) {
+        Logger.warn('Failed to delete activities for chat agent', {
+          operationId,
+          agentId,
+          error: activityError.message
+        });
+      }
+
+      // Step 12: Invalidate caches for this agent and its chats
       try {
         await redisService.invalidateChatAgentStats(subaccountId, agentId);
         await redisService.invalidateChatList(subaccountId);
+        await redisService.invalidateActivities(subaccountId);
       } catch (cacheError) {
-        Logger.warn('Failed to invalidate chat agent cache', {
+        Logger.warn('Failed to invalidate chat agent and activity caches', {
           operationId,
           error: cacheError.message
         });
       }
 
-      // Step 11: Log activity
+      // Step 13: Log activity
       await ActivityService.logActivity({
         subaccountId,
         activityType: ACTIVITY_TYPES.CHAT_AGENT_DELETED,
-        category: ACTIVITY_CATEGORIES.AGENT,
+        category: ACTIVITY_CATEGORIES.CHAT_AGENT,
         userId,
-        description: `Chat agent "${agentDocument.name}" deleted (including ${chatsDeleteResult.deletedCount} associated chats)`,
+        description: `Chat agent "${agentDocument.name}" deleted (including ${chatsDeleteResult.deletedCount} associated chats and ${activitiesDeletedCount} activities)`,
         metadata: {
           agentId,
           agentName: agentDocument.name,
@@ -6410,7 +6460,8 @@ class DatabaseController {
           whatsappDisconnected,
           instagramDisconnected,
           whatsappConnectionsDeleted: whatsappConnectionsDeleteResult.deletedCount,
-          instagramConnectionsDeleted: instagramConnectionsDeleteResult.deletedCount
+          instagramConnectionsDeleted: instagramConnectionsDeleteResult.deletedCount,
+          deletedActivitiesCount: activitiesDeletedCount
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
@@ -6421,11 +6472,12 @@ class DatabaseController {
 
       res.json({
         success: true,
-        message: `Chat agent deleted successfully (${chatsDeleteResult.deletedCount} chats also deleted)`,
+        message: `Chat agent deleted successfully (including ${chatsDeleteResult.deletedCount} chats and ${activitiesDeletedCount} activities)`,
         data: {
           agentId,
           llmId,
           chatsDeleted: chatsDeleteResult.deletedCount,
+          activitiesDeleted: activitiesDeletedCount,
           whatsappDisconnected,
           instagramDisconnected,
           whatsappConnectionsDeleted: whatsappConnectionsDeleteResult.deletedCount,

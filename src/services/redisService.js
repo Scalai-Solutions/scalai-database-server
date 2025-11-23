@@ -361,6 +361,57 @@ class RedisService {
     // Note: Local KB caches would need individual invalidation when we know the agentId
   }
 
+  // Activity cache methods
+  async cacheActivities(subaccountId, filterKey, data, ttl = 300) {
+    // Cache for 5 minutes by default as activities change frequently
+    // filterKey is a hash of the filter parameters (category, type, date range)
+    const key = `activities:${subaccountId}:${filterKey}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedActivities(subaccountId, filterKey) {
+    const key = `activities:${subaccountId}:${filterKey}`;
+    return await this.get(key);
+  }
+
+  async invalidateActivities(subaccountId) {
+    // Invalidate all activity caches for a subaccount
+    // Since activities can have different filter combinations, we use pattern matching
+    try {
+      const pattern = `activities:${subaccountId}:*`;
+      const keys = await this.client.keys(pattern);
+      if (keys && keys.length > 0) {
+        await Promise.all(keys.map(key => this.del(key)));
+        Logger.debug('Invalidated activity caches', {
+          subaccountId,
+          keysDeleted: keys.length
+        });
+      }
+    } catch (error) {
+      Logger.warn('Failed to invalidate activity caches', {
+        subaccountId,
+        error: error.message
+      });
+    }
+  }
+
+  // Chat agent statistics cache methods
+  async cacheChatAgentStats(subaccountId, agentId, data, ttl = 300) {
+    // Cache for 5 minutes by default as stats change frequently
+    const key = `chatagent:stats:${subaccountId}:${agentId}`;
+    return await this.set(key, data, ttl);
+  }
+
+  async getCachedChatAgentStats(subaccountId, agentId) {
+    const key = `chatagent:stats:${subaccountId}:${agentId}`;
+    return await this.get(key);
+  }
+
+  async invalidateChatAgentStats(subaccountId, agentId) {
+    const key = `chatagent:stats:${subaccountId}:${agentId}`;
+    return await this.del(key);
+  }
+
   // Health check
   async ping() {
     if (!this.isConnected) {
