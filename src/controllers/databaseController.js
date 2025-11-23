@@ -3707,9 +3707,9 @@ class DatabaseController {
       
       YOUR ULTIMATE GOAL IS TO BOOK A MEETING - be helpful and guide the conversation towards scheduling.`,
             tools: [
-              {
-                type: "end_call",
-                name: "end_call",
+          {
+            type: "end_call",
+            name: "end_call",
                 description: "End the call ONLY if user explicitly wants to end or says goodbye before scheduling"
               }
             ],
