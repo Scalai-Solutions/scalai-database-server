@@ -5796,7 +5796,6 @@ class DatabaseController {
       const meetingsAggregation = await meetingsCollection.aggregate([
         {
           $match: {
-            subaccountId: subaccountId,
             agentId: agentId,
             createdAt: {
               $gte: previousPeriodStart
