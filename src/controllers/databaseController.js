@@ -2718,6 +2718,7 @@ class DatabaseController {
       // Get collections
       const agentsCollection = connection.db.collection('agents');
       const callsCollection = connection.db.collection('calls');
+      const meetingsCollection = connection.db.collection('meetings');
 
       // Step 1: Verify agent exists
       const agentDocument = await agentsCollection.findOne({ 
@@ -2909,6 +2910,19 @@ class DatabaseController {
         unsuccessfulCalls: 0
       };
 
+      // Step 6: Get actual meetings count from meetings collection
+      // Note: Some meetings have subaccountId (from chat agents), some don't (from voice agents)
+      const actualMeetingsCount = await meetingsCollection.countDocuments({
+        $or: [
+          { agentId: agentId, subaccountId: subaccountId },
+          { agentId: agentId, subaccountId: { $exists: false } }
+        ],
+        createdAt: {
+          $gte: periodStart,
+          $lte: periodEnd
+        }
+      });
+
       // Helper function to format date labels based on groupBy
       const formatDateLabel = (dateStr, timestamp) => {
         const date = new Date(timestamp);
@@ -2983,8 +2997,12 @@ class DatabaseController {
           totalCalls: overallStats.totalCalls,
           successfulCalls: overallStats.successfulCalls,
           unsuccessfulCalls: overallStats.unsuccessfulCalls,
+          meetingsBooked: actualMeetingsCount,
           successRate: overallStats.totalCalls > 0 
             ? Math.round((overallStats.successfulCalls / overallStats.totalCalls) * 10000) / 100 
+            : 0,
+          meetingBookingRate: overallStats.totalCalls > 0 
+            ? Math.round((actualMeetingsCount / overallStats.totalCalls) * 10000) / 100 
             : 0
         },
         successTimeline,
@@ -5793,10 +5811,14 @@ class DatabaseController {
       ]).toArray();
 
       // Get meetings for both periods
+      // Note: Some meetings have subaccountId (from chat agents), some don't (from voice agents)
       const meetingsAggregation = await meetingsCollection.aggregate([
         {
           $match: {
-            agentId: agentId,
+            $or: [
+              { agentId: agentId, subaccountId: subaccountId },
+              { agentId: agentId, subaccountId: { $exists: false } }
+            ],
             createdAt: {
               $gte: previousPeriodStart
             }
