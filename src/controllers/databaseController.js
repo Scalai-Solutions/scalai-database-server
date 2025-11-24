@@ -224,7 +224,7 @@ class DatabaseController {
               {
                 type: "custom",
                 name: "check_availability",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/check-availability",
+                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
                 speak_during_execution: false,
                 speak_after_execution: true,
                 description: "Check if a specific time slot is available for booking an appointment",
@@ -268,41 +268,38 @@ class DatabaseController {
       Current time: {{current_time_Europe/Madrid}}
       Current date: {{current_calendar_Europe/Madrid}}
       
-      Perform intelligent slot search using nearest_available_slots function based on gathered preferences.
+      Call nearest_available_slots ONCE - it searches 30 days forward from startDate.
       
       SEARCH STRATEGY:
+      1. SPECIFIC DAY (e.g., "this Friday"): Start from that date
+      2. DATE RANGE (e.g., "second week"): Start from beginning of that range
+      3. ASAP/URGENT: Start from today
+      4. TIME PREFERENCE: Filter results (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
       
-      1. For SPECIFIC DAY requests (e.g., "this Friday"):
-         - Start search from that specific date
-         - If no slots found, inform user and search nearby days (day before, day after, week later)
+      CRITICAL - READING RESPONSE:
+      - Your startDate parameter is ONLY the search starting point
+      - The RESPONSE contains actual slot details with: date, day, startTime, endTime
+      - DO NOT assume slots are on the startDate you passed
+      - ALWAYS read and use the actual date/day/time from each slot in the response
       
-      2. For DATE RANGE requests:
-         - Start from beginning of range
-         - Search in chunks (function returns 30 days of data)
-         - If range is longer than 30 days, you may need multiple searches
+      PRESENTING RESULTS (Keep SHORT for voice):
+      - Brief: "I have Monday March 16th at 9 AM, 10 AM, and 11 AM. Which works?"
+      - For evening preference: Filter to 5pm-8pm slots only
+      - Don't list more than 5 options at once
       
-      3. For ASAP/URGENT requests:
-         - Start from today's date
-         - Find the earliest available slots
-      
-      4. For TIME PREFERENCE requests (morning/afternoon/evening):
-         - Search for slots and mentally filter based on time preference
-         - Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm
-      
-      PROGRESSIVE SEARCH:
-      - Initial search: Use startDate based on user preference
-      - If no results: Extend search by 30 days (call function again with new startDate)
-      - Maximum 3 searches (90 days total) before suggesting user call directly
+      ONE CALL RULE:
+      - Make ONE call, get results for 30 days
+      - DON'T make consecutive calls for nearby dates - already covered!
+      - Only make a second call if NO results found (extend by 30 days)
       
       IMPORTANT: 
-      - NEVER mention the function name "nearest_available_slots" to the user
-      - Present results naturally: "I found these available times..." not "The function returned..."
-      - Group and organize results intelligently before presenting
-      - After presenting slots, WAIT for user to select one - don't book yet
+      - NEVER mention function names
+      - Keep it conversational and brief
+      - After presenting, WAIT for selection
       
       TRANSITION:
-      - After presenting slots and receiving function results → IMMEDIATELY transition to slot_selection_state
-      - If no slots found after searching → fallback_search_state`,
+      - Got slots → slot_selection_state
+      - No slots found → fallback_search_state`,
             tools: [
               {
                 type: "custom",
@@ -350,37 +347,31 @@ class DatabaseController {
             state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
       Current time: {{current_time_Europe/Madrid}}
       
-      Present available slots intelligently to help user make a selection.
+      Present available slots briefly to help user select.
       
-      PRESENTATION STRATEGY:
+      PRESENTATION (Keep SHORT for voice):
       
-      If 1-3 slots available:
-      - List all options clearly: "I have [day, date at time], [day, date at time], and [day, date at time]. Which works best for you?"
+      For 1-3 slots:
+      - "I have Monday at 9 AM, Tuesday at 2 PM, or Wednesday at 10 AM. Which works?"
       
-      If 4-8 slots available:
-      - Group by day if multiple days
-      - "I have several options: On [day] I have [times], on [day] I have [times]..."
-      - "Would you like to hear all options or focus on a specific day?"
+      For 4-8 slots:
+      - Group by day: "On Monday I have 9 AM and 2 PM. On Tuesday I have 10 AM and 3 PM. Which day?"
       
-      If many slots (9+):
-      - Prioritize based on any stated preferences
-      - "I have many slots available. The earliest is [slot]. I also have options on [preferred days if mentioned]."
-      - "Would you like me to list all times or focus on specific days?"
+      For 9+ slots:
+      - "The earliest is Monday at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
       
       USER RESPONSE HANDLING:
-      - If user selects a specific slot → Note the selection and transition to slot_confirmation_state to confirm
-      - If user wants different options → Ask what they'd prefer and transition back to intelligent_search_state
-      - If user is unsure → Ask clarifying questions: "Do you prefer morning or afternoon?" 
+      - User selects slot → transition to slot_confirmation_state
+      - User wants different options → transition to intelligent_search_state
+      - User mentions new time → transition to check_availability_state
       
       IMPORTANT:
-      - DO NOT say "I will book" or "Let me book" yet - just acknowledge their selection
-      - Say something like: "Great choice! Let me confirm that with you..." then transition to slot_confirmation_state
-      - The actual booking happens later after confirmation
+      - DON'T say "I will book" yet - just acknowledge selection
+      - Brief: "Great choice! Let me confirm..." then transition
       
       REMEMBER:
-      - Be conversational and helpful
-      - Store the selected slot details for the next state
-      - If user mentions a slot not in your list, transition to check_availability_state to verify it`,
+      - Keep it conversational and brief
+      - Store selected slot details`,
             edges: [
               {
                 destination_state_name: "slot_confirmation_state",
@@ -402,44 +393,33 @@ class DatabaseController {
             state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
       Current time: {{current_time_Europe/Madrid}}
       
-      Handle situations when requested slots are not available or initial search found no results.
+      Handle when slots unavailable or no results found.
       
-      FALLBACK STRATEGIES based on context:
+      CRITICAL - ONE CALL SEARCHES 30 DAYS:
+      - nearest_available_slots searches 30 days forward
+      - DON'T make multiple calls for same range
+      - Only make new call if extending search window
       
-      1. If SPECIFIC SLOT was unavailable:
-         - "That exact time isn't available, but let me find the closest alternatives."
-         - Search same day different times
-         - Search adjacent days same time
-         - Search within +/- 3 days of requested date
+      FALLBACK STRATEGIES:
+      1. SPECIFIC SLOT unavailable: Search nearby dates (ONE call covers it)
+      2. NO SLOTS in range: Extend search by 30 days forward
+      3. Maximum: 2 search attempts (60 days) before suggesting direct contact
       
-      2. If SPECIFIC DAY had no slots:
-         - "I don't have any openings on [requested day], but let me check nearby days."
-         - Check day before and day after
-         - Check same day next week
-         - Expand to +/- 1 week if needed
+      READING RESPONSE:
+      - Response has actual slot data: date, day, startTime, endTime
+      - Use these exact values, don't assume dates
       
-      3. If NO SLOTS found in date range:
-         - "I haven't found availability in that timeframe. Let me expand the search."
-         - Extend search by 30 days forward
-         - Can search up to 90 days total (3 iterations)
+      PRESENTING (Keep brief):
+      - "That's not available, but I have Monday at 2 PM or Tuesday at 10 AM"
+      - Brief and actionable
       
-      SEARCH EXPANSION using nearest_available_slots:
-      - Call with progressively wider date ranges
-      - Iteration 1: Original request + nearby days
-      - Iteration 2: Extend by 2 weeks
-      - Iteration 3: Extend by 30 days
-      - If still nothing after 90 days, apologize and suggest calling directly
-      
-      COMMUNICATION:
-      - Always explain what you're doing
-      - "I couldn't find slots on Friday, but Saturday has several openings"
-      - "The closest available to your 2pm request is 3pm on the same day"
-      - Never mention technical details or function names
+      IMPORTANT:
+      - Never mention function names
+      - Keep it conversational
       
       TRANSITION:
-      - Slots found → slot_selection_state
-      - No slots after maximum search → apologize and offer phone contact
-      - User accepts alternative → slot_confirmation_state`,
+      - Got slots → slot_selection_state
+      - No slots after 60 days → apologize, offer phone contact`,
             tools: [
               {
                 type: "custom",
@@ -3828,9 +3808,9 @@ class DatabaseController {
       
       YOUR ULTIMATE GOAL IS TO BOOK A MEETING - be helpful and guide the conversation towards scheduling.`,
             tools: [
-          {
-            type: "end_call",
-            name: "end_call",
+              {
+                type: "end_call",
+                name: "end_call",
                 description: "End the call ONLY if user explicitly wants to end or says goodbye before scheduling"
               }
             ],
@@ -3999,41 +3979,39 @@ class DatabaseController {
       Current time: {{current_time_Europe/Madrid}}
       Current date: {{current_calendar_Europe/Madrid}}
       
-      Perform intelligent slot search using nearest_available_slots function based on gathered preferences.
+      Call nearest_available_slots ONCE - it searches 30 days forward from startDate.
       
       SEARCH STRATEGY:
+      1. SPECIFIC DAY (e.g., "this Friday"): Start from that date
+      2. DATE RANGE (e.g., "second week"): Start from beginning of that range
+      3. ASAP/URGENT: Start from today
+      4. TIME PREFERENCE: Filter results (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
       
-      1. For SPECIFIC DAY requests (e.g., "this Friday"):
-         - Start search from that specific date
-         - If no slots found, inform user and search nearby days (day before, day after, week later)
+      CRITICAL - READING RESPONSE:
+      - Your startDate parameter is ONLY the search starting point
+      - The RESPONSE contains actual slot details with: date, day, startTime, endTime
+      - DO NOT assume slots are on the startDate you passed
+      - ALWAYS read and use the actual date/day/time from each slot in the response
       
-      2. For DATE RANGE requests:
-         - Start from beginning of range
-         - Search in chunks (function returns 30 days of data)
-         - If range is longer than 30 days, you may need multiple searches
+      PRESENTING RESULTS (can be more detailed for chat):
+      - "I found these available times:"
+      - List with dates: "Monday, March 16th: 9:00 AM, 10:00 AM, 11:00 AM"
+      - For evening preference: Filter to 5pm-8pm slots only
+      - Can show up to 10 options in chat format
       
-      3. For ASAP/URGENT requests:
-         - Start from today's date
-         - Find the earliest available slots
-      
-      4. For TIME PREFERENCE requests (morning/afternoon/evening):
-         - Search for slots and mentally filter based on time preference
-         - Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm
-      
-      PROGRESSIVE SEARCH:
-      - Initial search: Use startDate based on user preference
-      - If no results: Extend search by 30 days (call function again with new startDate)
-      - Maximum 3 searches (90 days total) before suggesting user call directly
+      ONE CALL RULE:
+      - Make ONE call, get results for 30 days
+      - DON'T make consecutive calls for nearby dates - already covered!
+      - Only make a second call if NO results found (extend by 30 days)
       
       IMPORTANT: 
-      - NEVER mention the function name "nearest_available_slots" to the user
-      - Present results naturally: "I found these available times..." not "The function returned..."
-      - Group and organize results intelligently before presenting
-      - After presenting slots, WAIT for user to select one - don't book yet
+      - NEVER mention function names
+      - Present results clearly
+      - After presenting, WAIT for selection
       
       TRANSITION:
-      - After presenting slots and receiving function results → IMMEDIATELY transition to slot_selection_state
-      - If no slots found after searching → fallback_search_state`,
+      - Got slots → slot_selection_state
+      - No slots found → fallback_search_state`,
             tools: [
               {
                 type: "custom",
@@ -4081,37 +4059,31 @@ class DatabaseController {
             state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
       Current time: {{current_time_Europe/Madrid}}
       
-      Present available slots intelligently to help user make a selection.
+      Present available slots briefly to help user select.
       
-      PRESENTATION STRATEGY:
+      PRESENTATION (Keep SHORT for voice):
       
-      If 1-3 slots available:
-      - List all options clearly: "I have [day, date at time], [day, date at time], and [day, date at time]. Which works best for you?"
+      For 1-3 slots:
+      - "I have Monday at 9 AM, Tuesday at 2 PM, or Wednesday at 10 AM. Which works?"
       
-      If 4-8 slots available:
-      - Group by day if multiple days
-      - "I have several options: On [day] I have [times], on [day] I have [times]..."
-      - "Would you like to hear all options or focus on a specific day?"
+      For 4-8 slots:
+      - Group by day: "On Monday I have 9 AM and 2 PM. On Tuesday I have 10 AM and 3 PM. Which day?"
       
-      If many slots (9+):
-      - Prioritize based on any stated preferences
-      - "I have many slots available. The earliest is [slot]. I also have options on [preferred days if mentioned]."
-      - "Would you like me to list all times or focus on specific days?"
+      For 9+ slots:
+      - "The earliest is Monday at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
       
       USER RESPONSE HANDLING:
-      - If user selects a specific slot → Note the selection and transition to slot_confirmation_state to confirm
-      - If user wants different options → Ask what they'd prefer and transition back to intelligent_search_state
-      - If user is unsure → Ask clarifying questions: "Do you prefer morning or afternoon?" 
+      - User selects slot → transition to slot_confirmation_state
+      - User wants different options → transition to intelligent_search_state
+      - User mentions new time → transition to check_availability_state
       
       IMPORTANT:
-      - DO NOT say "I will book" or "Let me book" yet - just acknowledge their selection
-      - Say something like: "Great choice! Let me confirm that with you..." then transition to slot_confirmation_state
-      - The actual booking happens later after confirmation
+      - DON'T say "I will book" yet - just acknowledge selection
+      - Brief: "Great choice! Let me confirm..." then transition
       
       REMEMBER:
-      - Be conversational and helpful
-      - Store the selected slot details for the next state
-      - If user mentions a slot not in your list, transition to check_availability_state to verify it`,
+      - Keep it conversational and brief
+      - Store selected slot details`,
             edges: [
               {
                 destination_state_name: "slot_confirmation_state",
@@ -4133,44 +4105,33 @@ class DatabaseController {
             state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
       Current time: {{current_time_Europe/Madrid}}
       
-      Handle situations when requested slots are not available or initial search found no results.
+      Handle when slots unavailable or no results found.
       
-      FALLBACK STRATEGIES based on context:
+      CRITICAL - ONE CALL SEARCHES 30 DAYS:
+      - nearest_available_slots searches 30 days forward
+      - DON'T make multiple calls for same range
+      - Only make new call if extending search window
       
-      1. If SPECIFIC SLOT was unavailable:
-         - "That exact time isn't available, but let me find the closest alternatives."
-         - Search same day different times
-         - Search adjacent days same time
-         - Search within +/- 3 days of requested date
+      FALLBACK STRATEGIES:
+      1. SPECIFIC SLOT unavailable: Search nearby dates (ONE call covers it)
+      2. NO SLOTS in range: Extend search by 30 days forward
+      3. Maximum: 2 search attempts (60 days) before suggesting direct contact
       
-      2. If SPECIFIC DAY had no slots:
-         - "I don't have any openings on [requested day], but let me check nearby days."
-         - Check day before and day after
-         - Check same day next week
-         - Expand to +/- 1 week if needed
+      READING RESPONSE:
+      - Response has actual slot data: date, day, startTime, endTime
+      - Use these exact values, don't assume dates
       
-      3. If NO SLOTS found in date range:
-         - "I haven't found availability in that timeframe. Let me expand the search."
-         - Extend search by 30 days forward
-         - Can search up to 90 days total (3 iterations)
+      PRESENTING (Keep brief):
+      - "That's not available, but I have Monday at 2 PM or Tuesday at 10 AM"
+      - Brief and actionable
       
-      SEARCH EXPANSION using nearest_available_slots:
-      - Call with progressively wider date ranges
-      - Iteration 1: Original request + nearby days
-      - Iteration 2: Extend by 2 weeks
-      - Iteration 3: Extend by 30 days
-      - If still nothing after 90 days, apologize and suggest calling directly
-      
-      COMMUNICATION:
-      - Always explain what you're doing
-      - "I couldn't find slots on Friday, but Saturday has several openings"
-      - "The closest available to your 2pm request is 3pm on the same day"
-      - Never mention technical details or function names
+      IMPORTANT:
+      - Never mention function names
+      - Keep it conversational
       
       TRANSITION:
-      - Slots found → slot_selection_state
-      - No slots after maximum search → apologize and offer phone contact
-      - User accepts alternative → slot_confirmation_state`,
+      - Got slots → slot_selection_state
+      - No slots after 60 days → apologize, offer phone contact`,
             tools: [
               {
                 type: "custom",
