@@ -2000,7 +2000,8 @@ class DatabaseController {
             subaccountId: subaccountId,
             agentId: agentId,
             createdAt: {
-              $gte: previousPeriodStart
+              $gte: previousPeriodStart,
+              $lte: currentPeriodEnd
             }
           }
         },
@@ -2457,7 +2458,8 @@ class DatabaseController {
             subaccountId: subaccountId,
             agentId: agentId,
             createdAt: {
-              $gte: previousPeriodStart
+              $gte: previousPeriodStart,
+              $lte: currentPeriodEnd
             }
           }
         },
@@ -5218,7 +5220,8 @@ class DatabaseController {
             subaccountId: subaccountId,
             agentId: agentId,
             createdAt: {
-              $gte: previousPeriodStart
+              $gte: previousPeriodStart,
+              $lte: currentPeriodEnd
             }
           }
         },
@@ -5820,7 +5823,8 @@ class DatabaseController {
               { agentId: agentId, subaccountId: { $exists: false } }
             ],
             createdAt: {
-              $gte: previousPeriodStart
+              $gte: previousPeriodStart,
+              $lte: currentPeriodEnd
             }
           }
         },
