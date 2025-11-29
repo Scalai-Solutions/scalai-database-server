@@ -95,6 +95,14 @@ class DatabaseController {
       - Default to preference_gathering_state if user wants to schedule but provides no details
       - If user explicitly wants to end the call or says goodbye → use end_call tool
       
+      CRITICAL - NEVER GET STUCK:
+      - After EVERY tool call, you MUST respond AND transition in the SAME turn
+      - NEVER wait for user input after a tool call completes
+      - NEVER go silent - ALWAYS provide a response
+      - If a tool call fails, say "Let me try a different approach" and transition to an appropriate state
+      - State transitions are MANDATORY after tool calls - do not wait
+      - If you're unsure what to do, transition to intelligent_search_state or fallback_search_state
+      
       YOUR ULTIMATE GOAL IS TO BOOK A MEETING - be helpful and guide the conversation towards scheduling.`,
             tools: [
               {
@@ -208,18 +216,24 @@ class DatabaseController {
       - All times must be in Europe/Madrid timezone
       - Do NOT ask permission - just call the function immediately
       
-      RESPONSE HANDLING:
-      After receiving function result, respond AND transition in the SAME turn:
+      RESPONSE HANDLING - CRITICAL RULES:
+      After receiving function result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
       
       If slot is AVAILABLE:
       - Say: "Great! That slot on [day], [date] at [time] is available."
       - IMMEDIATELY transition to slot_confirmation_state in the same response
+      - DO NOT wait for user confirmation
       
       If slot is NOT AVAILABLE:
       - Say: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
       - IMMEDIATELY transition to fallback_search_state in the same response
+      - DO NOT wait for user input - the next state will handle searching
       
-      CRITICAL: Always transition immediately after receiving the function result. Never wait for more user input.`,
+      CRITICAL RULES:
+      1. ALWAYS respond after receiving tool result - NEVER go silent
+      2. ALWAYS transition in the same turn as your response
+      3. NEVER wait for user input after a tool call
+      4. If tool call fails or times out, say "Let me try a different approach" and transition to fallback_search_state`,
             tools: [
               {
                 type: "custom",
@@ -268,38 +282,49 @@ class DatabaseController {
       Current time: {{current_time_Europe/Madrid}}
       Current date: {{current_calendar_Europe/Madrid}}
       
-      Call nearest_available_slots ONCE - it searches 30 days forward from startDate.
+      CRITICAL - IMMEDIATE ACTION:
+      - When entering this state, IMMEDIATELY call nearest_available_slots function
+      - Do NOT wait for user input - call the tool right away
+      - The function searches 30 days forward from startDate
       
       SEARCH STRATEGY:
-      1. SPECIFIC DAY (e.g., "this Friday"): Start from that date
+      1. SPECIFIC DAY (e.g., "Monday", "this Friday"): Start from that date (calculate actual date)
       2. DATE RANGE (e.g., "second week"): Start from beginning of that range
       3. ASAP/URGENT: Start from today
-      4. TIME PREFERENCE: Filter results (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
+      4. TIME PREFERENCE: Filter results after receiving them (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
       
       CRITICAL - READING RESPONSE:
       - Your startDate parameter is ONLY the search starting point
       - The RESPONSE contains actual slot details with: date, day, startTime, endTime
       - DO NOT assume slots are on the startDate you passed
       - ALWAYS read and use the actual date/day/time from each slot in the response
+      - If user asked for "Monday" and response shows slots with day="Monday", those ARE Monday slots
       
-      PRESENTING RESULTS (Keep SHORT for voice):
-      - Brief: "I have Monday March 16th at 9 AM, 10 AM, and 11 AM. Which works?"
+      AFTER TOOL CALL - MANDATORY ACTIONS:
+      After receiving tool result, you MUST respond AND transition in the SAME turn:
+      
+      If slots found:
+      - Present results briefly: "I have Monday December 1st at 9 AM, 10 AM, and 11 AM. Which works?"
+      - Always include the actual date (December 1st), not just "Monday"
       - For evening preference: Filter to 5pm-8pm slots only
       - Don't list more than 5 options at once
+      - IMMEDIATELY transition to slot_selection_state
+      - DO NOT wait for user input - transition happens in same turn
+      
+      If NO slots found (empty array):
+      - IMMEDIATELY transition to fallback_search_state
+      - DO NOT wait for user input
       
       ONE CALL RULE:
       - Make ONE call, get results for 30 days
       - DON'T make consecutive calls for nearby dates - already covered!
-      - Only make a second call if NO results found (extend by 30 days)
+      - Only make a second call if NO results found (extend by 30 days) - but transition to fallback_search_state first
       
       IMPORTANT: 
       - NEVER mention function names
       - Keep it conversational and brief
-      - After presenting, WAIT for selection
-      
-      TRANSITION:
-      - Got slots → slot_selection_state
-      - No slots found → fallback_search_state`,
+      - ALWAYS respond after tool call - NEVER go silent
+      - ALWAYS transition immediately after presenting results`,
             tools: [
               {
                 type: "custom",
@@ -395,31 +420,50 @@ class DatabaseController {
       
       Handle when slots unavailable or no results found.
       
+      CRITICAL - IMMEDIATE ACTION REQUIRED:
+      - When entering this state, IMMEDIATELY call nearest_available_slots function
+      - Do NOT wait for user input - call the tool right away
+      - Search from the date that was requested (or today if no specific date)
+      
       CRITICAL - ONE CALL SEARCHES 30 DAYS:
-      - nearest_available_slots searches 30 days forward
+      - nearest_available_slots searches 30 days forward from startDate
       - DON'T make multiple calls for same range
       - Only make new call if extending search window
       
       FALLBACK STRATEGIES:
-      1. SPECIFIC SLOT unavailable: Search nearby dates (ONE call covers it)
-      2. NO SLOTS in range: Extend search by 30 days forward
+      1. SPECIFIC SLOT unavailable: Search from that date (ONE call covers 30 days)
+      2. NO SLOTS in range: Extend search by 30 days forward (add 30 days to startDate)
       3. Maximum: 2 search attempts (60 days) before suggesting direct contact
       
-      READING RESPONSE:
+      READING RESPONSE - CRITICAL:
       - Response has actual slot data: date, day, startTime, endTime
       - Use these exact values, don't assume dates
+      - ALWAYS read the actual date/day from each slot in the response
+      - If user asked for Monday and slots show Monday dates, those ARE available on Monday
+      
+      AFTER TOOL CALL - MANDATORY ACTIONS:
+      After receiving tool result, you MUST respond AND transition in the SAME turn:
+      
+      If slots found:
+      - Say: "I found some alternatives: [list 3-5 slots with dates and times]"
+      - IMMEDIATELY transition to slot_selection_state
+      - DO NOT wait for user input
+      
+      If NO slots found (empty array or error):
+      - If this is first attempt: Extend search by 30 days and call tool again
+      - If second attempt also fails: Say "I'm having trouble finding available slots in the next 60 days. Would you like me to check a specific date range, or would you prefer to contact us directly?"
+      - Wait for user response (this is the ONLY case where you wait)
       
       PRESENTING (Keep brief):
-      - "That's not available, but I have Monday at 2 PM or Tuesday at 10 AM"
+      - "That's not available, but I have Monday December 1st at 2 PM or Tuesday December 2nd at 10 AM"
+      - Always include the actual date, not just the day
       - Brief and actionable
       
       IMPORTANT:
       - Never mention function names
       - Keep it conversational
-      
-      TRANSITION:
-      - Got slots → slot_selection_state
-      - No slots after 60 days → apologize, offer phone contact`,
+      - ALWAYS respond after tool call - NEVER go silent
+      - ALWAYS transition immediately after presenting slots`,
             tools: [
               {
                 type: "custom",
@@ -3826,6 +3870,14 @@ class DatabaseController {
       - Default to preference_gathering_state if user wants to schedule but provides no details
       - If user explicitly wants to end the call or says goodbye → use end_call tool
       
+      CRITICAL - NEVER GET STUCK:
+      - After EVERY tool call, you MUST respond AND transition in the SAME turn
+      - NEVER wait for user input after a tool call completes
+      - NEVER go silent - ALWAYS provide a response
+      - If a tool call fails, say "Let me try a different approach" and transition to an appropriate state
+      - State transitions are MANDATORY after tool calls - do not wait
+      - If you're unsure what to do, transition to intelligent_search_state or fallback_search_state
+      
       YOUR ULTIMATE GOAL IS TO BOOK A MEETING - be helpful and guide the conversation towards scheduling.`,
             tools: [
               {
@@ -3939,18 +3991,24 @@ class DatabaseController {
       - All times must be in Europe/Madrid timezone
       - Do NOT ask permission - just call the function immediately
       
-      RESPONSE HANDLING:
-      After receiving function result, respond AND transition in the SAME turn:
+      RESPONSE HANDLING - CRITICAL RULES:
+      After receiving function result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
       
       If slot is AVAILABLE:
       - Say: "Great! That slot on [day], [date] at [time] is available."
       - IMMEDIATELY transition to slot_confirmation_state in the same response
+      - DO NOT wait for user confirmation
       
       If slot is NOT AVAILABLE:
       - Say: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
       - IMMEDIATELY transition to fallback_search_state in the same response
+      - DO NOT wait for user input - the next state will handle searching
       
-      CRITICAL: Always transition immediately after receiving the function result. Never wait for more user input.`,
+      CRITICAL RULES:
+      1. ALWAYS respond after receiving tool result - NEVER go silent
+      2. ALWAYS transition in the same turn as your response
+      3. NEVER wait for user input after a tool call
+      4. If tool call fails or times out, say "Let me try a different approach" and transition to fallback_search_state`,
             tools: [
               {
                 type: "custom",
@@ -3999,39 +4057,49 @@ class DatabaseController {
       Current time: {{current_time_Europe/Madrid}}
       Current date: {{current_calendar_Europe/Madrid}}
       
-      Call nearest_available_slots ONCE - it searches 30 days forward from startDate.
+      CRITICAL - IMMEDIATE ACTION:
+      - When entering this state, IMMEDIATELY call nearest_available_slots function
+      - Do NOT wait for user input - call the tool right away
+      - The function searches 30 days forward from startDate
       
       SEARCH STRATEGY:
-      1. SPECIFIC DAY (e.g., "this Friday"): Start from that date
+      1. SPECIFIC DAY (e.g., "Monday", "this Friday"): Start from that date (calculate actual date)
       2. DATE RANGE (e.g., "second week"): Start from beginning of that range
       3. ASAP/URGENT: Start from today
-      4. TIME PREFERENCE: Filter results (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
+      4. TIME PREFERENCE: Filter results after receiving them (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
       
       CRITICAL - READING RESPONSE:
       - Your startDate parameter is ONLY the search starting point
       - The RESPONSE contains actual slot details with: date, day, startTime, endTime
       - DO NOT assume slots are on the startDate you passed
       - ALWAYS read and use the actual date/day/time from each slot in the response
+      - If user asked for "Monday" and response shows slots with day="Monday", those ARE Monday slots
       
-      PRESENTING RESULTS (can be more detailed for chat):
-      - "I found these available times:"
-      - List with dates: "Monday, March 16th: 9:00 AM, 10:00 AM, 11:00 AM"
+      AFTER TOOL CALL - MANDATORY ACTIONS:
+      After receiving tool result, you MUST respond AND transition in the SAME turn:
+      
+      If slots found:
+      - Present results clearly: "I found these available times: Monday, December 1st: 9:00 AM, 10:00 AM, 11:00 AM"
+      - Always include the actual date (December 1st), not just "Monday"
       - For evening preference: Filter to 5pm-8pm slots only
       - Can show up to 10 options in chat format
+      - IMMEDIATELY transition to slot_selection_state
+      - DO NOT wait for user input - transition happens in same turn
+      
+      If NO slots found (empty array):
+      - IMMEDIATELY transition to fallback_search_state
+      - DO NOT wait for user input
       
       ONE CALL RULE:
       - Make ONE call, get results for 30 days
       - DON'T make consecutive calls for nearby dates - already covered!
-      - Only make a second call if NO results found (extend by 30 days)
+      - Only make a second call if NO results found (extend by 30 days) - but transition to fallback_search_state first
       
       IMPORTANT: 
       - NEVER mention function names
       - Present results clearly
-      - After presenting, WAIT for selection
-      
-      TRANSITION:
-      - Got slots → slot_selection_state
-      - No slots found → fallback_search_state`,
+      - ALWAYS respond after tool call - NEVER go silent
+      - ALWAYS transition immediately after presenting results`,
             tools: [
               {
                 type: "custom",
@@ -4127,31 +4195,50 @@ class DatabaseController {
       
       Handle when slots unavailable or no results found.
       
+      CRITICAL - IMMEDIATE ACTION REQUIRED:
+      - When entering this state, IMMEDIATELY call nearest_available_slots function
+      - Do NOT wait for user input - call the tool right away
+      - Search from the date that was requested (or today if no specific date)
+      
       CRITICAL - ONE CALL SEARCHES 30 DAYS:
-      - nearest_available_slots searches 30 days forward
+      - nearest_available_slots searches 30 days forward from startDate
       - DON'T make multiple calls for same range
       - Only make new call if extending search window
       
       FALLBACK STRATEGIES:
-      1. SPECIFIC SLOT unavailable: Search nearby dates (ONE call covers it)
-      2. NO SLOTS in range: Extend search by 30 days forward
+      1. SPECIFIC SLOT unavailable: Search from that date (ONE call covers 30 days)
+      2. NO SLOTS in range: Extend search by 30 days forward (add 30 days to startDate)
       3. Maximum: 2 search attempts (60 days) before suggesting direct contact
       
-      READING RESPONSE:
+      READING RESPONSE - CRITICAL:
       - Response has actual slot data: date, day, startTime, endTime
       - Use these exact values, don't assume dates
+      - ALWAYS read the actual date/day from each slot in the response
+      - If user asked for Monday and slots show Monday dates, those ARE available on Monday
+      
+      AFTER TOOL CALL - MANDATORY ACTIONS:
+      After receiving tool result, you MUST respond AND transition in the SAME turn:
+      
+      If slots found:
+      - Say: "I found some alternatives: [list 3-5 slots with dates and times]"
+      - IMMEDIATELY transition to slot_selection_state
+      - DO NOT wait for user input
+      
+      If NO slots found (empty array or error):
+      - If this is first attempt: Extend search by 30 days and call tool again
+      - If second attempt also fails: Say "I'm having trouble finding available slots in the next 60 days. Would you like me to check a specific date range, or would you prefer to contact us directly?"
+      - Wait for user response (this is the ONLY case where you wait)
       
       PRESENTING (Keep brief):
-      - "That's not available, but I have Monday at 2 PM or Tuesday at 10 AM"
+      - "That's not available, but I have Monday December 1st at 2 PM or Tuesday December 2nd at 10 AM"
+      - Always include the actual date, not just the day
       - Brief and actionable
       
       IMPORTANT:
       - Never mention function names
       - Keep it conversational
-      
-      TRANSITION:
-      - Got slots → slot_selection_state
-      - No slots after 60 days → apologize, offer phone contact`,
+      - ALWAYS respond after tool call - NEVER go silent
+      - ALWAYS transition immediately after presenting slots`,
             tools: [
               {
                 type: "custom",
@@ -5409,6 +5496,7 @@ class DatabaseController {
   }
 
   // Get detailed chat analytics with timeline and distribution
+  // NOTE: This endpoint intentionally does NOT use caching to ensure real-time data
   static async getChatAgentAnalytics(req, res, next) {
     const startTime = Date.now();
     const operationId = uuidv4();
@@ -5650,6 +5738,7 @@ class DatabaseController {
   }
 
   // Get chat analytics stats with period comparison
+  // NOTE: This endpoint intentionally does NOT use caching to ensure real-time data
   static async getChatAnalyticsStats(req, res, next) {
     const startTime = Date.now();
     const operationId = uuidv4();

@@ -1872,28 +1872,46 @@ class TwilioService {
         sipCredentials
       );
 
-      // Check if Retell import failed
-      if (retellNumber && !retellNumber.imported) {
-        Logger.warn('Retell import indicated failure but continuing', {
+      // CRITICAL: Only proceed if Retell import succeeded
+      if (!retellNumber || !retellNumber.imported) {
+        const errorMessage = retellNumber?.error || retellNumber?.message || 'Unknown error';
+        Logger.error('Retell import failed - aborting MongoDB storage', {
           phoneNumber,
-          retellNumber
+          retellNumber,
+          errorMessage
         });
+        throw new Error(`Failed to import phone number to Retell: ${errorMessage}. Phone number will not be stored in MongoDB.`);
       }
 
-      // Step 5: Store in MongoDB
-      Logger.info('Step 5: Storing phone number in MongoDB', { phoneNumber });
+      // Step 5: Store in MongoDB - ONLY after successful Retell import
+      Logger.info('Step 5: Storing phone number in MongoDB after successful Retell import', { phoneNumber });
 
       const phoneNumbersCollection = connection.db.collection('phonenumbers');
       
       const phoneNumberDocument = {
         phone_number: phoneNumber,
-        phone_number_id: retellNumber?.phone_number_id || null,
+        phone_number_id: retellNumber.phone_number_id || null,
+        phone_number_type: retellNumber.phone_number_type || null,
+        phone_number_pretty: retellNumber.phone_number_pretty || null,
+        inbound_agent_id: retellNumber.inbound_agent_id || null,
+        outbound_agent_id: retellNumber.outbound_agent_id || null,
+        inbound_agent_version: retellNumber.inbound_agent_version || null,
+        outbound_agent_version: retellNumber.outbound_agent_version || null,
+        area_code: retellNumber.area_code || null,
+        nickname: retellNumber.nickname || null,
+        inbound_webhook_url: retellNumber.inbound_webhook_url || null,
+        last_modification_timestamp: retellNumber.last_modification_timestamp || null,
         sid: purchasedNumber.sid,
         friendlyName: purchasedNumber.friendlyName,
         subaccountId: subaccountId,
         trunkSid: trunkSid,
         emergencyAddressId: emergencyAddressId,
-        retellImported: retellNumber?.imported || false,
+        termination_uri: terminationSipUri,
+        sip_credentials: sipCredentials ? {
+          username: sipCredentials.username
+          // Don't store password in plain text
+        } : null,
+        retellImported: true,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -2652,45 +2670,8 @@ class TwilioService {
         areaCode: response.data.area_code
       });
 
-      // Store phone number in MongoDB
-      try {
-        const connectionInfo = await connectionPoolManager.getConnection(subaccountId, 'system');
-        const { connection } = connectionInfo;
-        const phoneNumbersCollection = connection.db.collection('phonenumbers');
-
-        const phoneNumberDocument = {
-          subaccountId,
-          phone_number: response.data.phone_number,
-          phone_number_type: response.data.phone_number_type,
-          phone_number_pretty: response.data.phone_number_pretty,
-          inbound_agent_id: response.data.inbound_agent_id || null,
-          outbound_agent_id: response.data.outbound_agent_id || null,
-          inbound_agent_version: response.data.inbound_agent_version || null,
-          outbound_agent_version: response.data.outbound_agent_version || null,
-          area_code: response.data.area_code,
-          nickname: response.data.nickname || null,
-          inbound_webhook_url: response.data.inbound_webhook_url || null,
-          last_modification_timestamp: response.data.last_modification_timestamp,
-          termination_uri: terminationUri,
-          sip_credentials: sipCredentials ? {
-            username: sipCredentials.username
-            // Don't store password in plain text
-          } : null,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        };
-
-        await phoneNumbersCollection.insertOne(phoneNumberDocument);
-        Logger.info('Phone number stored in MongoDB', { phoneNumber, subaccountId });
-      } catch (dbError) {
-        Logger.error('Failed to store phone number in MongoDB', {
-          phoneNumber,
-          subaccountId,
-          error: dbError.message
-        });
-        // Don't fail the import if DB storage fails
-      }
-
+      // Return data - MongoDB storage will be handled by completePhoneNumberIntegration
+      // This ensures MongoDB is only updated after successful Retell import
       return {
         ...response.data,
         imported: true
