@@ -6,6 +6,7 @@ const ChatController = require('../controllers/chatController');
 
 // Import middleware
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
+const { authenticateServiceToken } = require('../middleware/serviceAuthMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
 const { requireResourcePermission } = require('../middleware/rbacClient');
 const { attachTimezone, convertResponseDates, convertRequestDates } = require('../middleware/timezoneMiddleware');
@@ -19,6 +20,13 @@ const {
   validateSendMessageBody,
   validateChatId
 } = require('../validators/chatValidator');
+
+// Webhook endpoint for updating chats (service token auth only - BEFORE common middleware)
+router.patch('/:subaccountId/webhook-update',
+  authenticateServiceToken,
+  validateSubaccountId,
+  ChatController.webhookUpdateChat
+);
 
 // Apply common middleware
 router.use(requestLogger);

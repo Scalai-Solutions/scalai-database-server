@@ -6,6 +6,7 @@ const Retell = require('../utils/retell');
 const { v4: uuidv4 } = require('uuid');
 const ActivityService = require('../services/activityService');
 const { ACTIVITY_TYPES, ACTIVITY_CATEGORIES } = ActivityService;
+const { getStorageFromRequest } = require('../services/storageManager');
 
 class ChatController {
   /**
@@ -751,6 +752,109 @@ class ChatController {
 
     } catch (error) {
       const errorInfo = await ChatController.handleError(error, req, operationId, 'deleteChat', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
+   * Webhook update chat (for webhook server)
+   * PATCH /api/chats/:subaccountId/webhook-update
+   */
+  static async webhookUpdateChat(req, res, next) {
+    const startTime = Date.now();
+    const operationId = uuidv4();
+
+    try {
+      const { subaccountId } = req.params;
+      const { chatId, updateData } = req.body;
+      const serviceName = req.service?.serviceName || 'unknown';
+
+      Logger.info('Webhook updating chat', {
+        operationId,
+        subaccountId,
+        chatId,
+        serviceName,
+        updateFields: Object.keys(updateData || {}),
+        isMockSession: req.mockSession?.isMock || false
+      });
+
+      if (!chatId || !updateData) {
+        return res.status(400).json({
+          success: false,
+          message: 'chatId and updateData are required',
+          code: 'MISSING_REQUIRED_FIELDS'
+        });
+      }
+
+      // Get storage (MongoDB or Mock based on session)
+      const storage = await getStorageFromRequest(req, subaccountId, 'webhook-service');
+      const chatsCollection = await storage.getCollection('chats');
+
+      // Upsert the chat document (match by chat_id and subaccountId for safety)
+      const result = await chatsCollection.updateOne(
+        { chat_id: chatId, subaccountId: subaccountId },
+        { 
+          $set: {
+            ...updateData,
+            subaccountId: subaccountId,
+            lastUpdatedBy: 'webhook-service',
+            lastUpdatedAt: new Date()
+          },
+          $setOnInsert: {
+            createdAt: new Date(), // Only set on insert, not on update
+            createdBy: 'webhook-service'
+          }
+        },
+        { upsert: true }
+      );
+
+      const duration = Date.now() - startTime;
+
+      Logger.info('Chat updated via webhook', {
+        operationId,
+        subaccountId,
+        chatId,
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+        upsertedCount: result.upsertedCount,
+        duration: `${duration}ms`
+      });
+
+      // Invalidate chat caches
+      if (redisService.isConnected) {
+        try {
+          await redisService.invalidateChat(subaccountId, chatId);
+          await redisService.invalidateChatList(subaccountId);
+          Logger.debug('Chat caches invalidated after webhook update', {
+            operationId,
+            subaccountId
+          });
+        } catch (cacheError) {
+          Logger.warn('Failed to invalidate chat caches', {
+            operationId,
+            error: cacheError.message
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'Chat updated successfully',
+        data: {
+          chatId,
+          matchedCount: result.matchedCount,
+          modifiedCount: result.modifiedCount,
+          upsertedCount: result.upsertedCount,
+          upsertedId: result.upsertedId
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+    } catch (error) {
+      const errorInfo = await ChatController.handleError(error, req, operationId, 'webhookUpdateChat', startTime);
       return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }
