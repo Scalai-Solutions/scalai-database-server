@@ -322,8 +322,71 @@ class ChatController {
         });
       }
 
+      // Check if chat is already ended
+      if (chatDocument.chat_status === 'ended') {
+        Logger.info('Chat already ended, retrieving final state', {
+          operationId,
+          subaccountId,
+          chatId
+        });
+
+        // Retrieve final chat state from Retell to get complete transcript and analysis
+        const finalChatState = await retell.retrieveChat(chatId);
+
+        // Update chat in database with latest data
+        const updateData = {
+          end_timestamp: finalChatState.end_timestamp || chatDocument.end_timestamp,
+          transcript: finalChatState.transcript || chatDocument.transcript,
+          messages: finalChatState.message_with_tool_calls || chatDocument.messages,
+          message_count: finalChatState.message_with_tool_calls?.length || chatDocument.message_count,
+          chat_cost: finalChatState.chat_cost || chatDocument.chat_cost,
+          chat_analysis: finalChatState.chat_analysis || chatDocument.chat_analysis,
+          collected_dynamic_variables: finalChatState.collected_dynamic_variables || chatDocument.collected_dynamic_variables,
+          updatedAt: new Date()
+        };
+
+        await chatsCollection.updateOne(
+          { chat_id: chatId, subaccountId: subaccountId },
+          { $set: updateData }
+        );
+
+        // Update cache
+        await redisService.invalidateChat(subaccountId, chatId);
+        await redisService.invalidateChatList(subaccountId);
+
+        const duration = Date.now() - startTime;
+
+        return res.json({
+          success: true,
+          message: 'Chat already ended',
+          data: {
+            chat_id: chatId,
+            chat_status: 'ended',
+            end_timestamp: updateData.end_timestamp
+          },
+          meta: {
+            operationId,
+            duration: `${duration}ms`
+          }
+        });
+      }
+
       // End chat using Retell
-      await retell.endChat(chatId);
+      try {
+        await retell.endChat(chatId);
+      } catch (endError) {
+        // If chat is already ended in Retell, handle gracefully
+        if (endError.message && endError.message.includes('already ended')) {
+          Logger.info('Chat already ended in Retell, retrieving final state', {
+            operationId,
+            subaccountId,
+            chatId
+          });
+        } else {
+          // Re-throw if it's a different error
+          throw endError;
+        }
+      }
 
       // Retrieve final chat state from Retell to get complete transcript and analysis
       const finalChatState = await retell.retrieveChat(chatId);

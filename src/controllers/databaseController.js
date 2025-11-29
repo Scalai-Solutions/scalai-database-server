@@ -406,14 +406,17 @@ class DatabaseController {
       USER RESPONSE HANDLING - IMMEDIATE TRANSITIONS:
       When user responds, IMMEDIATELY transition based on their response:
       
-      - User selects a slot (says "first slot", "book the first one", "that one", mentions date/time) → IMMEDIATELY transition to slot_confirmation_state (no message, just transition)
+      - User selects a slot (says "first slot", "second slot", "book the first one", "book the second slot", "that one", mentions date/time) → 
+        * DO NOT say "Great choice" or "Let me confirm" or anything
+        * DO NOT speak - just IMMEDIATELY transition to slot_confirmation_state
+        * Store selected slot details before transitioning
       - User wants different options (says "different", "other", "more") → IMMEDIATELY transition to intelligent_search_state
       - User mentions a NEW time not in your list → IMMEDIATELY transition to check_availability_state
       
       CRITICAL RULES:
       1. After presenting slots, WAIT for user response (this state has no tools, so waiting is correct)
-      2. When user responds, IMMEDIATELY transition - don't say anything, just transition
-      3. If user selects a slot, transition immediately without saying "Great choice" or anything
+      2. When user selects a slot, transition IMMEDIATELY - DO NOT say anything before transitioning
+      3. DO NOT say "Great choice" or "Let me confirm" - just transition silently
       4. Store selected slot details before transitioning
       
       IMPORTANT:
@@ -533,10 +536,14 @@ class DatabaseController {
             state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
       Current time: {{current_time_Europe/Madrid}}
       
-      When user selects/confirms a slot (says "first slot", "book the first one", "yes", "that one", "09:00", etc.):
-      - IMMEDIATELY call check_availability function - DO NOT speak before calling
-      - Use the selected date and time (convert to Europe/Madrid timezone if needed)
-      - DO NOT say anything - just call the tool immediately
+      YOU ARE IN THIS STATE BECAUSE THE USER HAS ALREADY SELECTED A SLOT.
+      Your ONLY job is to verify availability and proceed to booking.
+      
+      UPON ENTERING THIS STATE:
+      - IMMEDIATELY call check_availability function - DO NOT say anything first
+      - Use the selected slot details (date, startTime, endTime) from context
+      - DO NOT say "Great choice" or "Let me confirm" or "hold on" - just call the tool silently
+      - DO NOT ask for confirmation - the user already selected the slot
       
       MANDATORY: AFTER TOOL CALL COMPLETES, YOU MUST RESPOND IMMEDIATELY IN THE SAME TURN.
       When check_availability tool finishes executing, you will receive a tool result with an "available" field.
@@ -556,11 +563,12 @@ class DatabaseController {
       - IMMEDIATELY transition to fallback_search_state in the SAME response
       
       CRITICAL - AUTOMATIC RESPONSE REQUIRED:
-      1. Call check_availability IMMEDIATELY when user selects/confirms - NO speech before tool
+      1. When entering this state, call check_availability IMMEDIATELY - NO speech before tool
       2. When tool result arrives, respond IMMEDIATELY - do this automatically, no waiting
       3. Transition IMMEDIATELY in the same turn as your response
       4. NEVER wait for user input after tool execution
-      5. Keep responses SHORT and natural
+      5. NEVER say "hold on" or "please wait" - just call tool, then respond
+      6. Keep responses SHORT and natural
       
       If user wants to change (says "no", "change", "different"):
       - Say: "No problem, let me show other options."
@@ -620,22 +628,26 @@ class DatabaseController {
       
       You are now in the booking phase. Your goal is to collect details and complete the booking.
       
+      IMPORTANT: This is a CHAT conversation - users type their responses directly. 
+      DO NOT ask for spelling confirmation - users can type their information correctly.
+      Keep it simple and natural. No letter-by-letter spelling or digit-by-digit confirmation.
+      
       STEP-BY-STEP PROCESS:
       
       1. NAME COLLECTION:
          - Ask: "What's your name?"
-         - Get spelling if unclear: "Could you spell that?"
-         - Confirm: "That's [SPELL LETTER BY LETTER: A... S... H... O... K]. Correct?"
-         - Speak naturally, pause between letters
+         - Accept the name as provided - no spelling confirmation needed
+         - Move to next step once you have the name
       
       2. EMAIL COLLECTION:
          - Ask: "What's your email?"
-         - Confirm: "[SPELL EMAIL COMPLETELY]"
-         - For common domains say: "at gmail dot com" or "at outlook dot com"
+         - Accept the email as provided - no spelling confirmation needed
+         - Move to next step once you have the email
       
       3. PHONE COLLECTION:
          - Ask: "And your phone number?"
-         - Confirm: "[SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Right?"
+         - Accept the phone number as provided - no confirmation needed
+         - Move to booking once you have all 3 details
       
       4. BOOKING EXECUTION:
          - Once ALL THREE details are confirmed (name, email, phone), IMMEDIATELY call book_appointment function
@@ -660,11 +672,12 @@ class DatabaseController {
       - DO NOT wait for user input
       
       CRITICAL RULES:
-      1. Call book_appointment IMMEDIATELY when you have all 3 details
-      2. After tool returns, ALWAYS respond in the same turn
-      3. If booking succeeds, wait for user response (only exception)
-      4. If booking fails, transition immediately - do not wait
-      5. NEVER go silent after a tool call`,
+      1. This is CHAT - users type directly, no spelling confirmation needed
+      2. Call book_appointment IMMEDIATELY when you have all 3 details
+      3. After tool returns, ALWAYS respond in the same turn
+      4. If booking succeeds, wait for user response (only exception)
+      5. If booking fails, transition immediately - do not wait
+      6. NEVER go silent after a tool call`,
             tools: [
               {
                 type: "custom",
@@ -3913,6 +3926,8 @@ class DatabaseController {
       
       You are an intelligent appointment scheduling assistant. Your goal is to help users book appointments efficiently.
       
+      IMPORTANT: This is a CHAT conversation - users type their responses directly.
+      
       INITIAL ASSESSMENT:
       - Identify if the user wants to schedule an appointment
       - Listen for scheduling triggers (callback requests, service interest, appointment mentions)
@@ -4237,14 +4252,17 @@ class DatabaseController {
       USER RESPONSE HANDLING - IMMEDIATE TRANSITIONS:
       When user responds, IMMEDIATELY transition based on their response:
       
-      - User selects a slot (says "first slot", "book the first one", "that one", mentions date/time) → IMMEDIATELY transition to slot_confirmation_state (no message, just transition)
+      - User selects a slot (says "first slot", "second slot", "book the first one", "book the second slot", "that one", mentions date/time) → 
+        * DO NOT say "Great choice" or "Let me confirm" or anything
+        * DO NOT speak - just IMMEDIATELY transition to slot_confirmation_state
+        * Store selected slot details before transitioning
       - User wants different options (says "different", "other", "more") → IMMEDIATELY transition to intelligent_search_state
       - User mentions a NEW time not in your list → IMMEDIATELY transition to check_availability_state
       
       CRITICAL RULES:
       1. After presenting slots, WAIT for user response (this state has no tools, so waiting is correct)
-      2. When user responds, IMMEDIATELY transition - don't say anything, just transition
-      3. If user selects a slot, transition immediately without saying "Great choice" or anything
+      2. When user selects a slot, transition IMMEDIATELY - DO NOT say anything before transitioning
+      3. DO NOT say "Great choice" or "Let me confirm" - just transition silently
       4. Store selected slot details before transitioning
       
       IMPORTANT:
@@ -4364,10 +4382,14 @@ class DatabaseController {
             state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
       Current time: {{current_time_Europe/Madrid}}
       
-      When user selects/confirms a slot (says "first slot", "book the first one", "yes", "that one", "09:00", etc.):
-      - IMMEDIATELY call check_availability function - DO NOT speak before calling
-      - Use the selected date and time (convert to Europe/Madrid timezone if needed)
-      - DO NOT say anything - just call the tool immediately
+      YOU ARE IN THIS STATE BECAUSE THE USER HAS ALREADY SELECTED A SLOT.
+      Your ONLY job is to verify availability and proceed to booking.
+      
+      UPON ENTERING THIS STATE:
+      - IMMEDIATELY call check_availability function - DO NOT say anything first
+      - Use the selected slot details (date, startTime, endTime) from context
+      - DO NOT say "Great choice" or "Let me confirm" or "hold on" - just call the tool silently
+      - DO NOT ask for confirmation - the user already selected the slot
       
       MANDATORY: AFTER TOOL CALL COMPLETES, YOU MUST RESPOND IMMEDIATELY IN THE SAME TURN.
       When check_availability tool finishes executing, you will receive a tool result with an "available" field.
@@ -4387,11 +4409,12 @@ class DatabaseController {
       - IMMEDIATELY transition to fallback_search_state in the SAME response
       
       CRITICAL - AUTOMATIC RESPONSE REQUIRED:
-      1. Call check_availability IMMEDIATELY when user selects/confirms - NO speech before tool
+      1. When entering this state, call check_availability IMMEDIATELY - NO speech before tool
       2. When tool result arrives, respond IMMEDIATELY - do this automatically, no waiting
       3. Transition IMMEDIATELY in the same turn as your response
       4. NEVER wait for user input after tool execution
-      5. Keep responses SHORT and natural
+      5. NEVER say "hold on" or "please wait" - just call tool, then respond
+      6. Keep responses SHORT and natural
       
       If user wants to change (says "no", "change", "different"):
       - Say: "No problem, let me show other options."
@@ -4451,22 +4474,26 @@ class DatabaseController {
       
       You are now in the booking phase. Your goal is to collect details and complete the booking.
       
+      IMPORTANT: This is a CHAT conversation - users type their responses directly. 
+      DO NOT ask for spelling confirmation - users can type their information correctly.
+      Keep it simple and natural. No letter-by-letter spelling or digit-by-digit confirmation.
+      
       STEP-BY-STEP PROCESS:
       
       1. NAME COLLECTION:
          - Ask: "What's your name?"
-         - Get spelling if unclear: "Could you spell that?"
-         - Confirm: "That's [SPELL LETTER BY LETTER: A... S... H... O... K]. Correct?"
-         - Speak naturally, pause between letters
+         - Accept the name as provided - no spelling confirmation needed
+         - Move to next step once you have the name
       
       2. EMAIL COLLECTION:
          - Ask: "What's your email?"
-         - Confirm: "[SPELL EMAIL COMPLETELY]"
-         - For common domains say: "at gmail dot com" or "at outlook dot com"
+         - Accept the email as provided - no spelling confirmation needed
+         - Move to next step once you have the email
       
       3. PHONE COLLECTION:
          - Ask: "And your phone number?"
-         - Confirm: "[SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Right?"
+         - Accept the phone number as provided - no confirmation needed
+         - Move to booking once you have all 3 details
       
       4. BOOKING EXECUTION:
          - Once ALL THREE details are confirmed (name, email, phone), IMMEDIATELY call book_appointment function
@@ -4491,11 +4518,12 @@ class DatabaseController {
       - DO NOT wait for user input
       
       CRITICAL RULES:
-      1. Call book_appointment IMMEDIATELY when you have all 3 details
-      2. After tool returns, ALWAYS respond in the same turn
-      3. If booking succeeds, wait for user response (only exception)
-      4. If booking fails, transition immediately - do not wait
-      5. NEVER go silent after a tool call`,
+      1. This is CHAT - users type directly, no spelling confirmation needed
+      2. Call book_appointment IMMEDIATELY when you have all 3 details
+      3. After tool returns, ALWAYS respond in the same turn
+      4. If booking succeeds, wait for user response (only exception)
+      5. If booking fails, transition immediately - do not wait
+      6. NEVER go silent after a tool call`,
             tools: [
               {
                 type: "custom",
