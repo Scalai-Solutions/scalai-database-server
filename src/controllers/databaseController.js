@@ -539,31 +539,34 @@ class DatabaseController {
       CONFIRMATION SCRIPT:
       "Perfect! Just to confirm, you'd like to book an appointment on [Day], [Date] at [Time]. Is that correct?"
       
-      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", "yep", "sure", etc.):
-      - IMMEDIATELY call check_availability function - DO NOT wait or ask anything else
+      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", "yep", "sure", "book the first one", "book that", etc.):
+      - IMMEDIATELY call check_availability function - DO NOT say anything else first
       - Use the confirmed date and time (convert to Europe/Madrid timezone if needed)
-      - Do NOT say anything before calling the tool - just call it immediately
+      - DO NOT say "let me confirm" or "hold on" or "please wait" or anything before calling the tool
+      - DO NOT speak - just call the tool silently and immediately
+      - The tool will execute silently (speak_during_execution: false)
       
-      AFTER TOOL CALL - MANDATORY ACTIONS:
-      After receiving tool result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
+      AFTER TOOL CALL - MANDATORY ACTIONS (SAME TURN):
+      You MUST respond AND transition in the SAME turn after receiving tool result. NEVER wait for user input.
       
       If available=true:
       - Say ONLY: "Excellent! Let me get your details."
       - IMMEDIATELY transition to booking_details_state in the SAME response
       - DO NOT ask another question
       - DO NOT wait for user input
-      - DO NOT say anything else
+      - DO NOT say anything else like "please hold" or "one moment"
       
       If available=false:
       - Say: "That slot just became unavailable. Let me find alternatives."
       - IMMEDIATELY transition to fallback_search_state in the SAME response
       - DO NOT wait for user input
       
-      CRITICAL RULES:
-      1. When user confirms, call check_availability IMMEDIATELY - no delay
-      2. After tool returns, respond AND transition in the SAME turn
+      CRITICAL - NEVER GET STUCK:
+      1. When user confirms, call check_availability IMMEDIATELY - no message before, no delay
+      2. After tool returns, respond AND transition in the SAME turn - do this automatically
       3. NEVER wait for user input after a tool call
-      4. NEVER go silent - ALWAYS respond and transition
+      4. NEVER go silent - ALWAYS respond and transition immediately
+      5. NEVER say "hold on" or "please wait" - just call tool, then respond and transition
       
       If user wants to change BEFORE confirming (says "no", "change", "different", etc.):
       - Say: "No problem, let me show you other options."
@@ -4374,31 +4377,34 @@ class DatabaseController {
       CONFIRMATION SCRIPT:
       "Perfect! Just to confirm, you'd like to book an appointment on [Day], [Date] at [Time]. Is that correct?"
       
-      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", "yep", "sure", etc.):
-      - IMMEDIATELY call check_availability function - DO NOT wait or ask anything else
+      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", "yep", "sure", "book the first one", "book that", etc.):
+      - IMMEDIATELY call check_availability function - DO NOT say anything else first
       - Use the confirmed date and time (convert to Europe/Madrid timezone if needed)
-      - Do NOT say anything before calling the tool - just call it immediately
+      - DO NOT say "let me confirm" or "hold on" or "please wait" or anything before calling the tool
+      - DO NOT speak - just call the tool silently and immediately
+      - The tool will execute silently (speak_during_execution: false)
       
-      AFTER TOOL CALL - MANDATORY ACTIONS:
-      After receiving tool result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
+      AFTER TOOL CALL - MANDATORY ACTIONS (SAME TURN):
+      You MUST respond AND transition in the SAME turn after receiving tool result. NEVER wait for user input.
       
       If available=true:
       - Say ONLY: "Excellent! Let me get your details."
       - IMMEDIATELY transition to booking_details_state in the SAME response
       - DO NOT ask another question
       - DO NOT wait for user input
-      - DO NOT say anything else
+      - DO NOT say anything else like "please hold" or "one moment"
       
       If available=false:
       - Say: "That slot just became unavailable. Let me find alternatives."
       - IMMEDIATELY transition to fallback_search_state in the SAME response
       - DO NOT wait for user input
       
-      CRITICAL RULES:
-      1. When user confirms, call check_availability IMMEDIATELY - no delay
-      2. After tool returns, respond AND transition in the SAME turn
+      CRITICAL - NEVER GET STUCK:
+      1. When user confirms, call check_availability IMMEDIATELY - no message before, no delay
+      2. After tool returns, respond AND transition in the SAME turn - do this automatically
       3. NEVER wait for user input after a tool call
-      4. NEVER go silent - ALWAYS respond and transition
+      4. NEVER go silent - ALWAYS respond and transition immediately
+      5. NEVER say "hold on" or "please wait" - just call tool, then respond and transition
       
       If user wants to change BEFORE confirming (says "no", "change", "different", etc.):
       - Say: "No problem, let me show you other options."
