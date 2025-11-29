@@ -138,16 +138,25 @@ class DatabaseController {
       5. "How urgent is this appointment - do you need something as soon as possible?"
       
       INTELLIGENCE RULES:
-      - If user says a weekday (e.g., "Friday") → Note it and transition to date_clarification_state
-      - If user says "next week" → Calculate actual date range (next Monday to Sunday)
-      - If user says "ASAP" or "earliest available" → Note urgency and search from today
-      - If user gives a date range → Note both start and end dates
+      - If user says a weekday (e.g., "Friday") → Note it and IMMEDIATELY transition to date_clarification_state
+      - If user says "next week" → Calculate actual date range (next Monday to Sunday) and IMMEDIATELY transition to intelligent_search_state
+      - If user says "ASAP" or "earliest available" → Note urgency and IMMEDIATELY transition to intelligent_search_state
+      - If user gives a date range → Note both start and end dates and IMMEDIATELY transition to intelligent_search_state
       - Store preferences in context for later use
       
-      TRANSITION RULES:
-      - Specific date/time mentioned → date_clarification_state
-      - General preferences gathered (or user wants to see what's available) → intelligent_search_state
-      - User is vague and wants to see all options → intelligent_search_state`,
+      TRANSITION RULES - IMMEDIATE ACTIONS:
+      When user provides information, IMMEDIATELY transition based on what they said:
+      
+      - Specific date/time mentioned → IMMEDIATELY transition to date_clarification_state
+      - General preferences gathered (or user wants to see what's available) → IMMEDIATELY transition to intelligent_search_state
+      - User is vague and wants to see all options → IMMEDIATELY transition to intelligent_search_state
+      - User says "show me options" or "what's available" → IMMEDIATELY transition to intelligent_search_state
+      
+      CRITICAL:
+      - After gathering enough information to proceed, transition immediately
+      - Don't ask multiple questions if user already provided enough info
+      - If user mentions a specific day/date, go to date_clarification_state
+      - If user gives general preferences or wants to see options, go to intelligent_search_state`,
             edges: [
               {
                 destination_state_name: "intelligent_search_state",
@@ -185,10 +194,18 @@ class DatabaseController {
       - Be explicit about dates to avoid confusion
       - Store clarified date/time for next state
       
-      TRANSITION RULES:
-      - If specific time slot is clarified (date + time) → check_availability_state
-      - If only date is clarified (no specific time) → intelligent_search_state
-      - If date range is clarified → intelligent_search_state`,
+      TRANSITION RULES - IMMEDIATE ACTIONS:
+      After user clarifies or confirms the date, IMMEDIATELY transition:
+      
+      - If specific time slot is clarified (date + time) → IMMEDIATELY transition to check_availability_state
+      - If only date is clarified (no specific time) → IMMEDIATELY transition to intelligent_search_state
+      - If date range is clarified → IMMEDIATELY transition to intelligent_search_state
+      
+      CRITICAL:
+      - After user confirms/clarifies, transition immediately - don't ask follow-up questions
+      - Store the clarified date/time before transitioning
+      - If user provides both date and time, go to check_availability_state
+      - If user provides only date or date range, go to intelligent_search_state`,
             edges: [
               {
                 destination_state_name: "check_availability_state",
@@ -377,26 +394,32 @@ class DatabaseController {
       PRESENTATION (Keep SHORT for voice):
       
       For 1-3 slots:
-      - "I have Monday at 9 AM, Tuesday at 2 PM, or Wednesday at 10 AM. Which works?"
+      - "I have Monday December 1st at 9 AM, Tuesday December 2nd at 2 PM, or Wednesday December 3rd at 10 AM. Which works?"
+      - Always include the actual date, not just the day
       
       For 4-8 slots:
-      - Group by day: "On Monday I have 9 AM and 2 PM. On Tuesday I have 10 AM and 3 PM. Which day?"
+      - Group by day: "On Monday December 1st I have 9 AM and 2 PM. On Tuesday December 2nd I have 10 AM and 3 PM. Which day?"
       
       For 9+ slots:
-      - "The earliest is Monday at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
+      - "The earliest is Monday December 1st at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
       
-      USER RESPONSE HANDLING:
-      - User selects slot → transition to slot_confirmation_state
-      - User wants different options → transition to intelligent_search_state
-      - User mentions new time → transition to check_availability_state
+      USER RESPONSE HANDLING - IMMEDIATE TRANSITIONS:
+      When user responds, IMMEDIATELY transition based on their response:
+      
+      - User selects a slot (mentions date/time from your list) → Say "Great choice! Let me confirm..." and IMMEDIATELY transition to slot_confirmation_state
+      - User wants different options (says "different", "other", "more", "show me more") → IMMEDIATELY transition to intelligent_search_state
+      - User mentions a NEW time not in your list → IMMEDIATELY transition to check_availability_state
+      
+      CRITICAL RULES:
+      1. After presenting slots, WAIT for user response (this state has no tools, so waiting is correct)
+      2. When user responds, IMMEDIATELY transition - don't ask follow-up questions
+      3. If user selects a slot, acknowledge briefly and transition immediately
+      4. Store selected slot details before transitioning
       
       IMPORTANT:
-      - DON'T say "I will book" yet - just acknowledge selection
-      - Brief: "Great choice! Let me confirm..." then transition
-      
-      REMEMBER:
-      - Keep it conversational and brief
-      - Store selected slot details`,
+      - DON'T say "I will book" yet - just acknowledge selection briefly
+      - Keep transitions immediate and clear
+      - Store selected slot details (date, startTime, endTime)`,
             edges: [
               {
                 destination_state_name: "slot_confirmation_state",
@@ -516,16 +539,34 @@ class DatabaseController {
       CONFIRMATION SCRIPT:
       "Perfect! Just to confirm, you'd like to book an appointment on [Day], [Date] at [Time]. Is that correct?"
       
-      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", etc.):
-      1. IMMEDIATELY call check_availability function
-      2. After receiving the function result:
-         - If available=true: Say ONLY "Excellent! Let me get your details." and IMMEDIATELY transition to booking_details_state in the SAME response WITHOUT waiting for user input
-         - If available=false: Say "That slot just became unavailable. Let me find alternatives." and transition to fallback_search_state
+      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", "yep", "sure", etc.):
+      - IMMEDIATELY call check_availability function - DO NOT wait or ask anything else
+      - Use the confirmed date and time (convert to Europe/Madrid timezone if needed)
+      - Do NOT say anything before calling the tool - just call it immediately
       
-      CRITICAL: After check_availability returns available=true, you MUST transition to booking_details_state immediately. DO NOT ask another question or wait for user response.
+      AFTER TOOL CALL - MANDATORY ACTIONS:
+      After receiving tool result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
       
-      If user wants to change BEFORE confirming:
-      - "No problem, let me show you other options."
+      If available=true:
+      - Say ONLY: "Excellent! Let me get your details."
+      - IMMEDIATELY transition to booking_details_state in the SAME response
+      - DO NOT ask another question
+      - DO NOT wait for user input
+      - DO NOT say anything else
+      
+      If available=false:
+      - Say: "That slot just became unavailable. Let me find alternatives."
+      - IMMEDIATELY transition to fallback_search_state in the SAME response
+      - DO NOT wait for user input
+      
+      CRITICAL RULES:
+      1. When user confirms, call check_availability IMMEDIATELY - no delay
+      2. After tool returns, respond AND transition in the SAME turn
+      3. NEVER wait for user input after a tool call
+      4. NEVER go silent - ALWAYS respond and transition
+      
+      If user wants to change BEFORE confirming (says "no", "change", "different", etc.):
+      - Say: "No problem, let me show you other options."
       - Transition back to intelligent_search_state
       
       Store confirmed slot details (date, startTime, endTime) in dynamic variables for booking.`,
@@ -604,18 +645,30 @@ class DatabaseController {
          - Once ALL THREE details are confirmed (name, email, phone), IMMEDIATELY call book_appointment function
          - Use the previously confirmed date and time slot
          - Include meeting title like "Appointment with [customer name]"
+         - Do NOT wait or ask anything else - just call the tool immediately
       
-      5. AFTER BOOKING SUCCESS:
-         - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
-         - Say: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
-         - Ask: "Is there anything else I can help you with today?"
-         - If user says no → use end_call tool
-         - If user wants another appointment → transition to preference_gathering_state
+      AFTER BOOKING TOOL CALL - MANDATORY ACTIONS:
+      After receiving book_appointment result, you MUST respond in the SAME turn. NEVER wait for user input.
       
-      ERROR HANDLING:
-      - If booking fails → transition to error_recovery_state
+      If booking SUCCESS (response has meeting id or success=true):
+      - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
+      - Say: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
+      - Ask: "Is there anything else I can help you with today?"
+      - WAIT for user response (this is the ONLY case where you wait after a tool call)
+      - If user says no/nothing → use end_call tool
+      - If user wants another appointment → transition to preference_gathering_state
       
-      CRITICAL: Move through details collection efficiently. Once you have all 3 details, call book_appointment IMMEDIATELY.`,
+      If booking FAILS (error, no meeting id, success=false):
+      - Say: "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
+      - IMMEDIATELY transition to error_recovery_state in the SAME response
+      - DO NOT wait for user input
+      
+      CRITICAL RULES:
+      1. Call book_appointment IMMEDIATELY when you have all 3 details
+      2. After tool returns, ALWAYS respond in the same turn
+      3. If booking succeeds, wait for user response (only exception)
+      4. If booking fails, transition immediately - do not wait
+      5. NEVER go silent after a tool call`,
             tools: [
               {
                 type: "custom",
@@ -696,22 +749,27 @@ class DatabaseController {
       
       ERROR TYPES AND RESPONSES:
       
-      1. BOOKING FAILURE:
-         - "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
-         - Transition back to intelligent_search_state with saved preferences
+      1. BOOKING FAILURE (from booking_details_state):
+         - Say: "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
+         - IMMEDIATELY transition to intelligent_search_state with saved preferences
+         - DO NOT wait for user input - transition happens immediately
       
       2. SYSTEM UNAVAILABLE:
-         - "I'm having trouble accessing the booking system right now. Could you please try again in a few moments, or feel free to call us directly at [provide phone if available]."
-         - Ask if they'd like to try again
+         - Say: "I'm having trouble accessing the booking system right now. Would you like me to try again, or would you prefer to contact us directly?"
+         - WAIT for user response (this is one case where waiting is appropriate)
+         - If user says "try again" → transition back to booking_details_state
+         - If user says "contact" or "no" → provide contact info and ask if they want to end call
       
       3. INVALID DATA:
-         - "I think there might have been an issue with the information. Let me collect that again."
-         - Re-collect only the problematic information
-         - Return to booking_details_state
+         - Say: "I think there might have been an issue with the information. Let me collect that again."
+         - IMMEDIATELY transition to booking_details_state
+         - DO NOT wait for user input
       
       4. NETWORK/TIMEOUT:
-         - "The system is taking longer than expected. Let me try once more."
-         - Retry once, then provide alternative contact method if fails
+         - Say: "The system is taking longer than expected. Would you like me to try once more?"
+         - WAIT for user response
+         - If user says yes → transition back to booking_details_state
+         - If user says no → provide alternative contact method
       
       RECOVERY ACTIONS:
       - Always maintain positive, helpful tone
@@ -720,11 +778,13 @@ class DatabaseController {
       - Never leave user without a path forward
       - If user explicitly wants to end call or give up, use end_call tool
       
-      TRANSITIONS:
-      - For slot-related issues → intelligent_search_state
-      - For data collection issues → booking_details_state
-      - For temporary issues → retry current action once
-      - If user wants to end call → use end_call tool`,
+      TRANSITIONS - CRITICAL RULES:
+      - For slot-related issues → IMMEDIATELY transition to intelligent_search_state (no waiting)
+      - For data collection issues → IMMEDIATELY transition to booking_details_state (no waiting)
+      - For temporary issues that require retry → WAIT for user confirmation first, then transition
+      - If user wants to end call → use end_call tool
+      - ALWAYS respond immediately - never go silent
+      - Only wait for user input when explicitly asking if they want to retry`,
             tools: [
               {
                 type: "end_call",
@@ -3913,16 +3973,25 @@ class DatabaseController {
       5. "How urgent is this appointment - do you need something as soon as possible?"
       
       INTELLIGENCE RULES:
-      - If user says a weekday (e.g., "Friday") → Note it and transition to date_clarification_state
-      - If user says "next week" → Calculate actual date range (next Monday to Sunday)
-      - If user says "ASAP" or "earliest available" → Note urgency and search from today
-      - If user gives a date range → Note both start and end dates
+      - If user says a weekday (e.g., "Friday") → Note it and IMMEDIATELY transition to date_clarification_state
+      - If user says "next week" → Calculate actual date range (next Monday to Sunday) and IMMEDIATELY transition to intelligent_search_state
+      - If user says "ASAP" or "earliest available" → Note urgency and IMMEDIATELY transition to intelligent_search_state
+      - If user gives a date range → Note both start and end dates and IMMEDIATELY transition to intelligent_search_state
       - Store preferences in context for later use
       
-      TRANSITION RULES:
-      - Specific date/time mentioned → date_clarification_state
-      - General preferences gathered (or user wants to see what's available) → intelligent_search_state
-      - User is vague and wants to see all options → intelligent_search_state`,
+      TRANSITION RULES - IMMEDIATE ACTIONS:
+      When user provides information, IMMEDIATELY transition based on what they said:
+      
+      - Specific date/time mentioned → IMMEDIATELY transition to date_clarification_state
+      - General preferences gathered (or user wants to see what's available) → IMMEDIATELY transition to intelligent_search_state
+      - User is vague and wants to see all options → IMMEDIATELY transition to intelligent_search_state
+      - User says "show me options" or "what's available" → IMMEDIATELY transition to intelligent_search_state
+      
+      CRITICAL:
+      - After gathering enough information to proceed, transition immediately
+      - Don't ask multiple questions if user already provided enough info
+      - If user mentions a specific day/date, go to date_clarification_state
+      - If user gives general preferences or wants to see options, go to intelligent_search_state`,
             edges: [
               {
                 destination_state_name: "intelligent_search_state",
@@ -3960,10 +4029,18 @@ class DatabaseController {
       - Be explicit about dates to avoid confusion
       - Store clarified date/time for next state
       
-      TRANSITION RULES:
-      - If specific time slot is clarified (date + time) → check_availability_state
-      - If only date is clarified (no specific time) → intelligent_search_state
-      - If date range is clarified → intelligent_search_state`,
+      TRANSITION RULES - IMMEDIATE ACTIONS:
+      After user clarifies or confirms the date, IMMEDIATELY transition:
+      
+      - If specific time slot is clarified (date + time) → IMMEDIATELY transition to check_availability_state
+      - If only date is clarified (no specific time) → IMMEDIATELY transition to intelligent_search_state
+      - If date range is clarified → IMMEDIATELY transition to intelligent_search_state
+      
+      CRITICAL:
+      - After user confirms/clarifies, transition immediately - don't ask follow-up questions
+      - Store the clarified date/time before transitioning
+      - If user provides both date and time, go to check_availability_state
+      - If user provides only date or date range, go to intelligent_search_state`,
             edges: [
               {
                 destination_state_name: "check_availability_state",
@@ -4152,26 +4229,32 @@ class DatabaseController {
       PRESENTATION (Keep SHORT for voice):
       
       For 1-3 slots:
-      - "I have Monday at 9 AM, Tuesday at 2 PM, or Wednesday at 10 AM. Which works?"
+      - "I have Monday December 1st at 9 AM, Tuesday December 2nd at 2 PM, or Wednesday December 3rd at 10 AM. Which works?"
+      - Always include the actual date, not just the day
       
       For 4-8 slots:
-      - Group by day: "On Monday I have 9 AM and 2 PM. On Tuesday I have 10 AM and 3 PM. Which day?"
+      - Group by day: "On Monday December 1st I have 9 AM and 2 PM. On Tuesday December 2nd I have 10 AM and 3 PM. Which day?"
       
       For 9+ slots:
-      - "The earliest is Monday at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
+      - "The earliest is Monday December 1st at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
       
-      USER RESPONSE HANDLING:
-      - User selects slot → transition to slot_confirmation_state
-      - User wants different options → transition to intelligent_search_state
-      - User mentions new time → transition to check_availability_state
+      USER RESPONSE HANDLING - IMMEDIATE TRANSITIONS:
+      When user responds, IMMEDIATELY transition based on their response:
+      
+      - User selects a slot (mentions date/time from your list) → Say "Great choice! Let me confirm..." and IMMEDIATELY transition to slot_confirmation_state
+      - User wants different options (says "different", "other", "more", "show me more") → IMMEDIATELY transition to intelligent_search_state
+      - User mentions a NEW time not in your list → IMMEDIATELY transition to check_availability_state
+      
+      CRITICAL RULES:
+      1. After presenting slots, WAIT for user response (this state has no tools, so waiting is correct)
+      2. When user responds, IMMEDIATELY transition - don't ask follow-up questions
+      3. If user selects a slot, acknowledge briefly and transition immediately
+      4. Store selected slot details before transitioning
       
       IMPORTANT:
-      - DON'T say "I will book" yet - just acknowledge selection
-      - Brief: "Great choice! Let me confirm..." then transition
-      
-      REMEMBER:
-      - Keep it conversational and brief
-      - Store selected slot details`,
+      - DON'T say "I will book" yet - just acknowledge selection briefly
+      - Keep transitions immediate and clear
+      - Store selected slot details (date, startTime, endTime)`,
             edges: [
               {
                 destination_state_name: "slot_confirmation_state",
@@ -4291,16 +4374,34 @@ class DatabaseController {
       CONFIRMATION SCRIPT:
       "Perfect! Just to confirm, you'd like to book an appointment on [Day], [Date] at [Time]. Is that correct?"
       
-      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", etc.):
-      1. IMMEDIATELY call check_availability function
-      2. After receiving the function result:
-         - If available=true: Say ONLY "Excellent! Let me get your details." and IMMEDIATELY transition to booking_details_state in the SAME response WITHOUT waiting for user input
-         - If available=false: Say "That slot just became unavailable. Let me find alternatives." and transition to fallback_search_state
+      WHEN USER CONFIRMS (says "yes", "correct", "book it", "that's right", "yep", "sure", etc.):
+      - IMMEDIATELY call check_availability function - DO NOT wait or ask anything else
+      - Use the confirmed date and time (convert to Europe/Madrid timezone if needed)
+      - Do NOT say anything before calling the tool - just call it immediately
       
-      CRITICAL: After check_availability returns available=true, you MUST transition to booking_details_state immediately. DO NOT ask another question or wait for user response.
+      AFTER TOOL CALL - MANDATORY ACTIONS:
+      After receiving tool result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
       
-      If user wants to change BEFORE confirming:
-      - "No problem, let me show you other options."
+      If available=true:
+      - Say ONLY: "Excellent! Let me get your details."
+      - IMMEDIATELY transition to booking_details_state in the SAME response
+      - DO NOT ask another question
+      - DO NOT wait for user input
+      - DO NOT say anything else
+      
+      If available=false:
+      - Say: "That slot just became unavailable. Let me find alternatives."
+      - IMMEDIATELY transition to fallback_search_state in the SAME response
+      - DO NOT wait for user input
+      
+      CRITICAL RULES:
+      1. When user confirms, call check_availability IMMEDIATELY - no delay
+      2. After tool returns, respond AND transition in the SAME turn
+      3. NEVER wait for user input after a tool call
+      4. NEVER go silent - ALWAYS respond and transition
+      
+      If user wants to change BEFORE confirming (says "no", "change", "different", etc.):
+      - Say: "No problem, let me show you other options."
       - Transition back to intelligent_search_state
       
       Store confirmed slot details (date, startTime, endTime) in dynamic variables for booking.`,
@@ -4379,18 +4480,30 @@ class DatabaseController {
          - Once ALL THREE details are confirmed (name, email, phone), IMMEDIATELY call book_appointment function
          - Use the previously confirmed date and time slot
          - Include meeting title like "Appointment with [customer name]"
+         - Do NOT wait or ask anything else - just call the tool immediately
       
-      5. AFTER BOOKING SUCCESS:
-         - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
-         - Say: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
-         - Ask: "Is there anything else I can help you with today?"
-         - If user says no → use end_call tool
-         - If user wants another appointment → transition to preference_gathering_state
+      AFTER BOOKING TOOL CALL - MANDATORY ACTIONS:
+      After receiving book_appointment result, you MUST respond in the SAME turn. NEVER wait for user input.
       
-      ERROR HANDLING:
-      - If booking fails → transition to error_recovery_state
+      If booking SUCCESS (response has meeting id or success=true):
+      - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
+      - Say: "Perfect! Your appointment is all set for [DATE] at [TIME]. You'll receive a confirmation email at [EMAIL] shortly."
+      - Ask: "Is there anything else I can help you with today?"
+      - WAIT for user response (this is the ONLY case where you wait after a tool call)
+      - If user says no/nothing → use end_call tool
+      - If user wants another appointment → transition to preference_gathering_state
       
-      CRITICAL: Move through details collection efficiently. Once you have all 3 details, call book_appointment IMMEDIATELY.`,
+      If booking FAILS (error, no meeting id, success=false):
+      - Say: "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
+      - IMMEDIATELY transition to error_recovery_state in the SAME response
+      - DO NOT wait for user input
+      
+      CRITICAL RULES:
+      1. Call book_appointment IMMEDIATELY when you have all 3 details
+      2. After tool returns, ALWAYS respond in the same turn
+      3. If booking succeeds, wait for user response (only exception)
+      4. If booking fails, transition immediately - do not wait
+      5. NEVER go silent after a tool call`,
             tools: [
               {
                 type: "custom",
@@ -4471,22 +4584,27 @@ class DatabaseController {
       
       ERROR TYPES AND RESPONSES:
       
-      1. BOOKING FAILURE:
-         - "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
-         - Transition back to intelligent_search_state with saved preferences
+      1. BOOKING FAILURE (from booking_details_state):
+         - Say: "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
+         - IMMEDIATELY transition to intelligent_search_state with saved preferences
+         - DO NOT wait for user input - transition happens immediately
       
       2. SYSTEM UNAVAILABLE:
-         - "I'm having trouble accessing the booking system right now. Could you please try again in a few moments, or feel free to call us directly at [provide phone if available]."
-         - Ask if they'd like to try again
+         - Say: "I'm having trouble accessing the booking system right now. Would you like me to try again, or would you prefer to contact us directly?"
+         - WAIT for user response (this is one case where waiting is appropriate)
+         - If user says "try again" → transition back to booking_details_state
+         - If user says "contact" or "no" → provide contact info and ask if they want to end call
       
       3. INVALID DATA:
-         - "I think there might have been an issue with the information. Let me collect that again."
-         - Re-collect only the problematic information
-         - Return to booking_details_state
+         - Say: "I think there might have been an issue with the information. Let me collect that again."
+         - IMMEDIATELY transition to booking_details_state
+         - DO NOT wait for user input
       
       4. NETWORK/TIMEOUT:
-         - "The system is taking longer than expected. Let me try once more."
-         - Retry once, then provide alternative contact method if fails
+         - Say: "The system is taking longer than expected. Would you like me to try once more?"
+         - WAIT for user response
+         - If user says yes → transition back to booking_details_state
+         - If user says no → provide alternative contact method
       
       RECOVERY ACTIONS:
       - Always maintain positive, helpful tone
@@ -4495,11 +4613,13 @@ class DatabaseController {
       - Never leave user without a path forward
       - If user explicitly wants to end call or give up, use end_call tool
       
-      TRANSITIONS:
-      - For slot-related issues → intelligent_search_state
-      - For data collection issues → booking_details_state
-      - For temporary issues → retry current action once
-      - If user wants to end call → use end_call tool`,
+      TRANSITIONS - CRITICAL RULES:
+      - For slot-related issues → IMMEDIATELY transition to intelligent_search_state (no waiting)
+      - For data collection issues → IMMEDIATELY transition to booking_details_state (no waiting)
+      - For temporary issues that require retry → WAIT for user confirmation first, then transition
+      - If user wants to end call → use end_call tool
+      - ALWAYS respond immediately - never go silent
+      - Only wait for user input when explicitly asking if they want to retry`,
             tools: [
               {
                 type: "end_call",
