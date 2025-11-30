@@ -866,6 +866,17 @@ class WhatsAppService {
       // Get sender's phone number (without @c.us suffix)
       const phoneNumber = message.from.replace('@c.us', '');
 
+      // Extract contact information from WhatsApp message
+      // WhatsApp messages may have pushName, notifyName, or contact name
+      const contactInfo = {};
+      if (message.pushName) {
+        contactInfo.name = message.pushName;
+      } else if (message.notifyName) {
+        contactInfo.name = message.notifyName;
+      } else if (message.contact && message.contact.pushname) {
+        contactInfo.name = message.contact.pushname;
+      }
+      
       // Extract message content - use body if available, otherwise describe media
       let messageContent = message.body || '';
       if (message.hasMedia && !messageContent) {
@@ -887,6 +898,7 @@ class WhatsAppService {
         subaccountId,
         agentId,
         phoneNumber,
+        contactName: contactInfo.name,
         messageLength: messageContent.length
       });
 
@@ -895,7 +907,8 @@ class WhatsAppService {
         subaccountId, 
         agentId, 
         phoneNumber,
-        messageContent
+        messageContent,
+        contactInfo
       );
 
       Logger.debug('Received response from chat agent', {
@@ -1047,13 +1060,13 @@ class WhatsAppService {
   /**
    * Forward message to chat agent and get response
    */
-  async forwardToChageAgent(subaccountId, agentId, phoneNumber, messageContent) {
+  async forwardToChageAgent(subaccountId, agentId, phoneNumber, messageContent, contactInfo = {}) {
     try {
       const retellService = require('./retellService');
       const Retell = require('../utils/retell');
       
       // Get or create chat session for this WhatsApp contact
-      const chatId = await this.getOrCreateChatSession(subaccountId, agentId, phoneNumber);
+      const chatId = await this.getOrCreateChatSession(subaccountId, agentId, phoneNumber, contactInfo);
       
       // Get retell account data
       const retellAccountData = await retellService.getRetellAccount(subaccountId);
@@ -1118,8 +1131,12 @@ class WhatsAppService {
 
   /**
    * Get or create chat session for WhatsApp contact
+   * @param {string} subaccountId - Subaccount ID
+   * @param {string} agentId - Agent ID
+   * @param {string} phoneNumber - WhatsApp phone number
+   * @param {Object} contactInfo - Optional contact information (name, etc.)
    */
-  async getOrCreateChatSession(subaccountId, agentId, phoneNumber) {
+  async getOrCreateChatSession(subaccountId, agentId, phoneNumber, contactInfo = {}) {
     // Use Redis lock to prevent race condition when creating chats
     const lockKey = `whatsapp:chat:lock:${subaccountId}:${agentId}:${phoneNumber}`;
     let lockAcquired = false;
@@ -1218,7 +1235,31 @@ class WhatsAppService {
       const retellAccountData = await retellService.getRetellAccount(subaccountId);
       const retell = new Retell(retellAccountData.apiKey, retellAccountData);
       
-      const chatResponse = await retell.createChat(agentId);
+      // Prepare dynamic variables with WhatsApp contact information
+      const retell_llm_dynamic_variables = {
+        customer_phone: phoneNumber,
+        channel: 'whatsapp'
+      };
+      
+      // Add contact name if available
+      if (contactInfo.name) {
+        retell_llm_dynamic_variables.customer_name = contactInfo.name;
+      }
+      
+      // Add any other contact info
+      if (contactInfo.email) {
+        retell_llm_dynamic_variables.customer_email = contactInfo.email;
+      }
+      
+      const chatResponse = await retell.createChat(agentId, {
+        retell_llm_dynamic_variables,
+        metadata: {
+          whatsapp_phone: phoneNumber,
+          channel: 'whatsapp',
+          ...(contactInfo.name && { contact_name: contactInfo.name }),
+          ...(contactInfo.email && { contact_email: contactInfo.email })
+        }
+      });
       
       // Store chat with WhatsApp metadata
       const newChatDocument = {
@@ -1232,9 +1273,11 @@ class WhatsAppService {
         messages: [],
         metadata: {
           whatsapp_phone: phoneNumber,
-          channel: 'whatsapp'
+          channel: 'whatsapp',
+          ...(contactInfo.name && { contact_name: contactInfo.name }),
+          ...(contactInfo.email && { contact_email: contactInfo.email })
         },
-        retell_llm_dynamic_variables: {},
+        retell_llm_dynamic_variables: chatResponse.retell_llm_dynamic_variables || {},
         collected_dynamic_variables: {},
         subaccountId,
         createdBy: 'whatsapp-service',

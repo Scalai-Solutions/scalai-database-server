@@ -19,7 +19,12 @@ class ChatController {
 
     try {
       const { subaccountId } = req.params;
-      const { agentId } = req.body;
+      const { 
+        agentId, 
+        retell_llm_dynamic_variables,
+        metadata,
+        agent_version
+      } = req.body;
       const userId = req.user.id;
 
       Logger.info('Creating chat', {
@@ -27,6 +32,9 @@ class ChatController {
         subaccountId,
         userId,
         agentId,
+        hasDynamicVariables: !!retell_llm_dynamic_variables,
+        hasMetadata: !!metadata,
+        agentVersion: agent_version,
         effectiveRole: req.permission?.effectiveRole
       });
 
@@ -68,8 +76,19 @@ class ChatController {
         });
       }
 
-      // Create chat with Retell
-      const chatResponse = await retell.createChat(agentId);
+      // Create chat with Retell, passing dynamic variables and other options
+      const chatOptions = {};
+      if (retell_llm_dynamic_variables && typeof retell_llm_dynamic_variables === 'object') {
+        chatOptions.retell_llm_dynamic_variables = retell_llm_dynamic_variables;
+      }
+      if (metadata && typeof metadata === 'object') {
+        chatOptions.metadata = metadata;
+      }
+      if (agent_version && typeof agent_version === 'number') {
+        chatOptions.agent_version = agent_version;
+      }
+
+      const chatResponse = await retell.createChat(agentId, chatOptions);
 
       // Store chat information in database
       const chatsCollection = connection.db.collection('chats');
@@ -138,6 +157,7 @@ class ChatController {
           agent_id: chatResponse.agent_id,
           chat_status: chatResponse.chat_status,
           start_timestamp: chatResponse.start_timestamp,
+          retell_llm_dynamic_variables: chatResponse.retell_llm_dynamic_variables || {},
           retellAccount: {
             accountName: retellAccountData.accountName,
             accountId: retellAccountData.id
@@ -233,22 +253,22 @@ class ChatController {
         messageCount: response.messages?.length || 0
       });
 
-      // Log activity
-      await ActivityService.logActivity({
-        subaccountId,
-        activityType: ACTIVITY_TYPES.CHAT_MESSAGE_SENT,
-        category: ACTIVITY_CATEGORIES.CHAT,
-        userId,
-        description: `Message sent in chat ${chatId}`,
-        metadata: {
-          chatId,
-          agentId: chatDocument.agent_id,
-          messageCount: response.messages?.length || 0
-        },
-        resourceId: chatId,
-        resourceName: `Chat ${chatId}`,
-        operationId
-      });
+      // Activity logging for chat messages is disabled - too frequent
+      // await ActivityService.logActivity({
+      //   subaccountId,
+      //   activityType: ACTIVITY_TYPES.CHAT_MESSAGE_SENT,
+      //   category: ACTIVITY_CATEGORIES.CHAT,
+      //   userId,
+      //   description: `Message sent in chat ${chatId}`,
+      //   metadata: {
+      //     chatId,
+      //     agentId: chatDocument.agent_id,
+      //     messageCount: response.messages?.length || 0
+      //   },
+      //   resourceId: chatId,
+      //   resourceName: `Chat ${chatId}`,
+      //   operationId
+      // });
 
       const duration = Date.now() - startTime;
 

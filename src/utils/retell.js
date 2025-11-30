@@ -516,23 +516,50 @@ class Retell {
   /**
    * Create a new chat with an agent
    * @param {string} agentId - The agent ID to use for the chat
+   * @param {Object} options - Optional parameters for chat creation
+   * @param {Object} options.retell_llm_dynamic_variables - Dynamic variables to inject into Response Engine prompt
+   * @param {Object} options.metadata - Metadata to store with the chat
+   * @param {number} options.agent_version - The version of the chat agent to use
    * @returns {Promise<Object>} The chat response with chat_id, agent_id, etc.
    */
-  async createChat(agentId) {
+  async createChat(agentId, options = {}) {
     try {
+      const { retell_llm_dynamic_variables, metadata, agent_version } = options;
+
       Logger.info('Creating chat', {
         agentId,
         accountName: this.accountName,
-        subaccountId: this.subaccountId
+        subaccountId: this.subaccountId,
+        hasDynamicVariables: !!retell_llm_dynamic_variables,
+        hasMetadata: !!metadata,
+        agentVersion: agent_version
       });
 
-      const chatResponse = await this.client.chat.create({ agent_id: agentId });
+      const chatParams = {
+        agent_id: agentId
+      };
+
+      // Add optional parameters if provided
+      if (retell_llm_dynamic_variables && typeof retell_llm_dynamic_variables === 'object') {
+        chatParams.retell_llm_dynamic_variables = retell_llm_dynamic_variables;
+      }
+
+      if (metadata && typeof metadata === 'object') {
+        chatParams.metadata = metadata;
+      }
+
+      if (agent_version && typeof agent_version === 'number') {
+        chatParams.agent_version = agent_version;
+      }
+
+      const chatResponse = await this.client.chat.create(chatParams);
       
       Logger.info('Chat created successfully', {
         chatId: chatResponse.chat_id,
         agentId: chatResponse.agent_id,
         accountName: this.accountName,
-        subaccountId: this.subaccountId
+        subaccountId: this.subaccountId,
+        dynamicVariables: chatResponse.retell_llm_dynamic_variables
       });
 
       return chatResponse;

@@ -3928,7 +3928,7 @@ class DatabaseController {
         model_high_priority: true,
         tool_call_strict_mode: true,
         begin_message: "",
-        general_prompt: "You are an intelligent appointment scheduling assistant that helps users book meetings efficiently. This is a CHAT conversation - you can provide more detailed responses than voice calls. Be helpful and clear.",
+        general_prompt: "You are an intelligent appointment scheduling assistant that helps users book meetings efficiently. This is a CHAT conversation - you can provide more detailed responses than voice calls. Be helpful and clear. CRITICAL: NEVER announce state transitions or say things like '*Transitioning to...*' - transitions are internal and silent.",
         general_tools: [],
         states: [
           {
@@ -3942,6 +3942,12 @@ class DatabaseController {
       
       IMPORTANT: This is a CHAT conversation - users type their responses directly.
       You can provide more detailed responses than voice calls - be helpful and clear.
+      
+      CRITICAL - NO TRANSITION ANNOUNCEMENTS:
+      - NEVER say "*Transitioning to...*" or any variation
+      - NEVER announce what state you're entering
+      - Transitions are internal - users don't need to know about them
+      - Just respond naturally - don't mention transitions
       
       INITIAL ASSESSMENT:
       - Identify if the user wants to schedule an appointment

@@ -7,6 +7,25 @@ const createChatBodySchema = Joi.object({
     .messages({
       'any.required': 'Agent ID is required',
       'string.empty': 'Agent ID cannot be empty'
+    }),
+  retell_llm_dynamic_variables: Joi.object()
+    .optional()
+    .messages({
+      'object.base': 'retell_llm_dynamic_variables must be an object'
+    }),
+  metadata: Joi.object()
+    .optional()
+    .messages({
+      'object.base': 'metadata must be an object'
+    }),
+  agent_version: Joi.number()
+    .integer()
+    .positive()
+    .optional()
+    .messages({
+      'number.base': 'agent_version must be a number',
+      'number.integer': 'agent_version must be an integer',
+      'number.positive': 'agent_version must be a positive number'
     })
 });
 
