@@ -189,6 +189,59 @@ class ConnectorService {
     return await redisService.del(key);
   }
 
+  // Initiate Gmail OAuth flow
+  async initiateGmailOAuth(subaccountId, userEmail) {
+    try {
+      const webhookServerUrl = config.webhookServer?.url || 'http://localhost:3004';
+      const webhookServerToken = config.webhookServer?.serviceToken || config.serviceToken.token;
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Service-Token': webhookServerToken,
+        'X-Service-Name': config.server.serviceName
+      };
+
+      Logger.info('Proxying Gmail OAuth to webhook server', {
+        subaccountId,
+        userEmail,
+        webhookServerUrl
+      });
+
+      const response = await axios.post(
+        `${webhookServerUrl}/api/gmail/${subaccountId}/connect`,
+        { userEmail },
+        { 
+          headers,
+          timeout: config.webhookServer?.timeout || 10000
+        }
+      );
+
+      Logger.info('Gmail OAuth initiated successfully', {
+        subaccountId,
+        userEmail,
+        success: response.data.success
+      });
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      Logger.error('Failed to initiate Gmail OAuth', {
+        subaccountId,
+        userEmail,
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data
+      });
+
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message || 'Failed to connect to webhook server'
+      };
+    }
+  }
+
   // Initiate Google Calendar OAuth flow
   async initiateGoogleCalendarOAuth(subaccountId, userEmail) {
     try {

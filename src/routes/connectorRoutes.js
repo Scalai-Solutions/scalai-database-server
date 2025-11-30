@@ -137,6 +137,12 @@ router.post('/:subaccountId/handlegooglecalendar',
   ConnectorController.handleGoogleCalendarConnect
 );
 
+// POST /api/connectors/:subaccountId/handlegmail - Proxy Gmail connection to webhook server
+router.post('/:subaccountId/handlegmail',
+  validateSubaccountId,
+  ConnectorController.handleGmailConnect
+);
+
 // POST /api/connectors/:subaccountId/metadata/update - Update connector metadata (service-to-service)
 router.post('/:subaccountId/metadata/update',
   validateSubaccountId,

@@ -801,6 +801,86 @@ class ConnectorController {
   }
 
   /**
+   * Handle Gmail connection - Proxy to webhook server
+   */
+  async handleGmailConnect(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { userEmail } = req.body;
+
+      if (!userEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'userEmail is required',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      Logger.info('Initiating Gmail connection', {
+        subaccountId,
+        userEmail,
+        requestId: req.requestId
+      });
+
+      // Proxy to webhook server
+      const result = await connectorService.initiateGmailOAuth(subaccountId, userEmail);
+
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: result.error || 'Failed to initiate Gmail connection',
+          code: 'GMAIL_CONNECT_FAILED'
+        });
+      }
+
+      Logger.info('Gmail OAuth initiated successfully', {
+        subaccountId,
+        userEmail,
+        authUrl: result.data.authUrl
+      });
+
+      // Log activity
+      await ActivityService.logActivity({
+        subaccountId,
+        activityType: ACTIVITY_TYPES.CONNECTOR_ADDED,
+        category: ACTIVITY_CATEGORIES.CONNECTOR,
+        userId: req.user?.id || 'system',
+        description: `Gmail connection initiated for ${userEmail}`,
+        metadata: {
+          userEmail,
+          emailSent: result.data.emailSent
+        },
+        resourceId: 'email',
+        resourceName: 'Email (Gmail)',
+        operationId: req.requestId
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: result.data.message || 'Gmail authorization initiated',
+        data: {
+          authUrl: result.data.authUrl,
+          userEmail: result.data.userEmail,
+          subaccountId: result.data.subaccountId,
+          emailSent: result.data.emailSent
+        }
+      });
+
+    } catch (error) {
+      Logger.error('Failed to handle Gmail connection', {
+        error: error.message,
+        stack: error.stack
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to initiate Gmail connection',
+        code: 'INTERNAL_ERROR'
+      });
+    }
+  }
+
+  /**
    * Handle Google Calendar connection - Proxy to webhook server
    */
   async handleGoogleCalendarConnect(req, res) {
