@@ -242,6 +242,100 @@ class ConnectorService {
     }
   }
 
+  // Get Gmail connection status
+  async getGmailConnectionStatus(subaccountId, userEmail) {
+    try {
+      const webhookServerUrl = config.webhookServer?.url || 'http://localhost:3004';
+      const webhookServerToken = config.webhookServer?.serviceToken || config.serviceToken.token;
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Service-Token': webhookServerToken,
+        'X-Service-Name': config.server.serviceName
+      };
+
+      const url = userEmail 
+        ? `${webhookServerUrl}/api/gmail/${subaccountId}/status?userEmail=${encodeURIComponent(userEmail)}`
+        : `${webhookServerUrl}/api/gmail/${subaccountId}/status`;
+
+      Logger.info('Proxying Gmail status check to webhook server', {
+        subaccountId,
+        userEmail,
+        webhookServerUrl
+      });
+
+      const response = await axios.get(url, { 
+        headers,
+        timeout: config.webhookServer?.timeout || 10000
+      });
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      Logger.error('Failed to get Gmail connection status', {
+        subaccountId,
+        userEmail,
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data
+      });
+
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message || 'Failed to connect to webhook server'
+      };
+    }
+  }
+
+  // Disconnect Gmail account
+  async disconnectGmail(subaccountId, userEmail) {
+    try {
+      const webhookServerUrl = config.webhookServer?.url || 'http://localhost:3004';
+      const webhookServerToken = config.webhookServer?.serviceToken || config.serviceToken.token;
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Service-Token': webhookServerToken,
+        'X-Service-Name': config.server.serviceName
+      };
+
+      Logger.info('Proxying Gmail disconnect to webhook server', {
+        subaccountId,
+        userEmail,
+        webhookServerUrl
+      });
+
+      const response = await axios.post(
+        `${webhookServerUrl}/api/gmail/${subaccountId}/disconnect`,
+        { userEmail },
+        { 
+          headers,
+          timeout: config.webhookServer?.timeout || 10000
+        }
+      );
+
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      Logger.error('Failed to disconnect Gmail', {
+        subaccountId,
+        userEmail,
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data
+      });
+
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message || 'Failed to connect to webhook server'
+      };
+    }
+  }
+
   // Initiate Google Calendar OAuth flow
   async initiateGoogleCalendarOAuth(subaccountId, userEmail) {
     try {

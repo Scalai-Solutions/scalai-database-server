@@ -881,6 +881,94 @@ class ConnectorController {
   }
 
   /**
+   * Get Gmail connection status - Proxy to webhook server
+   */
+  async getGmailStatus(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { userEmail } = req.query;
+
+      Logger.info('Getting Gmail connection status', {
+        subaccountId,
+        userEmail,
+        requestId: req.requestId
+      });
+
+      // Proxy to webhook server
+      const result = await connectorService.getGmailConnectionStatus(subaccountId, userEmail);
+
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: result.error || 'Failed to get Gmail connection status',
+          code: 'GMAIL_STATUS_FAILED'
+        });
+      }
+
+      return res.status(200).json(result.data);
+    } catch (error) {
+      Logger.error('Failed to get Gmail status', {
+        error: error.message,
+        stack: error.stack
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to get Gmail connection status',
+        code: 'INTERNAL_ERROR'
+      });
+    }
+  }
+
+  /**
+   * Disconnect Gmail - Proxy to webhook server
+   */
+  async disconnectGmail(req, res) {
+    try {
+      const { subaccountId } = req.params;
+      const { userEmail } = req.body;
+
+      if (!userEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'userEmail is required',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      Logger.info('Disconnecting Gmail', {
+        subaccountId,
+        userEmail,
+        requestId: req.requestId
+      });
+
+      // Proxy to webhook server
+      const result = await connectorService.disconnectGmail(subaccountId, userEmail);
+
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: result.error || 'Failed to disconnect Gmail',
+          code: 'GMAIL_DISCONNECT_FAILED'
+        });
+      }
+
+      return res.status(200).json(result.data);
+    } catch (error) {
+      Logger.error('Failed to disconnect Gmail', {
+        error: error.message,
+        stack: error.stack
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to disconnect Gmail',
+        code: 'INTERNAL_ERROR'
+      });
+    }
+  }
+
+  /**
    * Handle Google Calendar connection - Proxy to webhook server
    */
   async handleGoogleCalendarConnect(req, res) {
