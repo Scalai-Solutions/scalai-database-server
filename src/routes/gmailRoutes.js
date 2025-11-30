@@ -7,7 +7,6 @@ const ConnectorController = require('../controllers/connectorController');
 // Import middleware
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
 const { userLimiter, subaccountLimiter } = require('../middleware/rateLimiter');
-const { requireResourcePermission } = require('../middleware/rbacClient');
 
 // Import validators
 const { validateSubaccountId } = require('../validators/connectorValidator');
@@ -20,17 +19,17 @@ router.use(authenticateToken);
 router.use(userLimiter);
 
 // GET /api/gmail/:subaccountId/status - Get Gmail connection status (proxy to webhook server)
+// Note: No RBAC permission check - only requires JWT authentication
 router.get('/:subaccountId/status',
   validateSubaccountId,
-  requireResourcePermission(),
   subaccountLimiter(100, 60000),
   ConnectorController.getGmailStatus
 );
 
 // POST /api/gmail/:subaccountId/disconnect - Disconnect Gmail (proxy to webhook server)
+// Note: No RBAC permission check - only requires JWT authentication
 router.post('/:subaccountId/disconnect',
   validateSubaccountId,
-  requireResourcePermission(),
   subaccountLimiter(50, 60000),
   ConnectorController.disconnectGmail
 );
