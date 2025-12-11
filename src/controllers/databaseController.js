@@ -7106,23 +7106,23 @@ class DatabaseController {
         });
       }
 
-      // Log activity
-      await ActivityService.logActivity({
-        subaccountId,
-        activityType: ACTIVITY_TYPES.CHAT_AGENT_UPDATED,
-        category: ACTIVITY_CATEGORIES.CHAT_AGENT,
-        userId,
-        description: `Chat agent "${agentDocument.name}" updated`,
-        metadata: {
-          agentId,
-          agentName: agentDocument.name,
-          llmId,
-          updatedFields: Object.keys(updates)
-        },
-        resourceId: agentId,
-        resourceName: agentDocument.name,
-        operationId
-      });
+      // Log activity - Disabled
+      // await ActivityService.logActivity({
+      //   subaccountId,
+      //   activityType: ACTIVITY_TYPES.CHAT_AGENT_UPDATED,
+      //   category: ACTIVITY_CATEGORIES.CHAT_AGENT,
+      //   userId,
+      //   description: `Chat agent "${agentDocument.name}" updated`,
+      //   metadata: {
+      //     agentId,
+      //     agentName: agentDocument.name,
+      //     llmId,
+      //     updatedFields: Object.keys(updates)
+      //   },
+      //   resourceId: agentId,
+      //   resourceName: agentDocument.name,
+      //   operationId
+      // });
 
       const duration = Date.now() - startTime;
 

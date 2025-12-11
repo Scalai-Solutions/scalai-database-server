@@ -54,22 +54,22 @@ class WhatsAppController {
         dataKeys: result && result.data ? Object.keys(result.data) : []
       });
 
-      // Log activity
-      await ActivityService.logActivity({
-        subaccountId,
-        activityType: ACTIVITY_TYPES.WHATSAPP_CONNECTED,
-        category: ACTIVITY_CATEGORIES.CHAT,
-        userId,
-        description: `WhatsApp connection initiated for agent ${agentDocument.name || agentId}`,
-        metadata: {
-          agentId,
-          agentName: agentDocument.name,
-          qrGenerated: !!(result && result.data && result.data.qrCodeDataUrl)
-        },
-        resourceId: agentId,
-        resourceName: `WhatsApp - ${agentDocument.name || agentId}`,
-        operationId
-      });
+      // Log activity - Disabled
+      // await ActivityService.logActivity({
+      //   subaccountId,
+      //   activityType: ACTIVITY_TYPES.WHATSAPP_CONNECTED,
+      //   category: ACTIVITY_CATEGORIES.CHAT,
+      //   userId,
+      //   description: `WhatsApp connection initiated for agent ${agentDocument.name || agentId}`,
+      //   metadata: {
+      //     agentId,
+      //     agentName: agentDocument.name,
+      //     qrGenerated: !!(result && result.data && result.data.qrCodeDataUrl)
+      //   },
+      //   resourceId: agentId,
+      //   resourceName: `WhatsApp - ${agentDocument.name || agentId}`,
+      //   operationId
+      // });
 
       const duration = Date.now() - startTime;
 
