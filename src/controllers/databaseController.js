@@ -70,7 +70,7 @@ class DatabaseController {
         model_high_priority: true,
         tool_call_strict_mode: true,
         begin_message: "",
-        general_prompt: "You are an intelligent appointment scheduling assistant that helps users book meetings efficiently. CRITICAL: Keep ALL responses SHORT - one to two phrases maximum. This is a VOICE call - be concise and natural.",
+        general_prompt: "You are an intelligent appointment scheduling assistant that helps users book meetings efficiently. CRITICAL: Keep ALL responses SHORT - one to two phrases maximum. This is a VOICE call - be concise and natural. NEVER announce state transitions or say things like 'Transitioning to...' or '*Transitioning to...*' - transitions are internal and completely silent.",
         general_tools: [],
         states: [
           {
@@ -86,6 +86,12 @@ class DatabaseController {
       - Keep ALL responses SHORT - one to two phrases maximum
       - This is a VOICE call - be concise and natural
       - Avoid long explanations - get to the point quickly
+      
+      CRITICAL - NO TRANSITION ANNOUNCEMENTS:
+      - NEVER say "Transitioning to..." or "*Transitioning to...*" or any variation
+      - NEVER announce what state you're entering
+      - Transitions are completely internal and SILENT - users don't need to know about them
+      - Just respond naturally - NEVER mention transitions, states, or internal processes
       
       INITIAL ASSESSMENT:
       - Identify if the user wants to schedule an appointment
@@ -1718,10 +1724,11 @@ class DatabaseController {
     }).length;
 
     // Calculate cumulative success rate
-    const callsWithScores = calls.filter(call => call.success_score && call.success_score > 0);
-    const totalSuccessScore = callsWithScores.reduce((sum, call) => sum + (call.success_score || 0), 0);
-    const cumulativeSuccessRate = callsWithScores.length > 0 
-      ? (totalSuccessScore / callsWithScores.length) * 100 
+    // Include ALL calls in the calculation, not just those with scores
+    // Calls without success_score are treated as 0 (failure)
+    const totalSuccessScore = calls.reduce((sum, call) => sum + (call.success_score || 0), 0);
+    const cumulativeSuccessRate = totalCalls > 0 
+      ? (totalSuccessScore / totalCalls) * 100 
       : 0;
 
     return {
@@ -2064,17 +2071,19 @@ class DatabaseController {
           }
         },
         // Calculate cumulative success rate
+        // NOTE: We now divide by totalCalls (not just calls with scores) to get accurate success rate
         {
           $project: {
             _id: 1,
             totalCalls: 1,
             unresponsiveCalls: 1,
             callIds: 1,
+            // Replace null scores with 0 for proper calculation
             successScores: {
-              $filter: {
+              $map: {
                 input: '$successScores',
                 as: 'score',
-                cond: { $ne: ['$$score', null] }
+                in: { $ifNull: ['$$score', 0] }
               }
             }
           }
@@ -2087,7 +2096,7 @@ class DatabaseController {
             callIds: 1,
             cumulativeSuccessRate: {
               $cond: {
-                if: { $gt: [{ $size: '$successScores' }, 0] },
+                if: { $gt: ['$totalCalls', 0] },
                 then: {
                   $divide: [
                     { $reduce: {
@@ -2095,7 +2104,7 @@ class DatabaseController {
                       initialValue: 0,
                       in: { $add: ['$$value', '$$this'] }
                     }},
-                    { $size: '$successScores' }
+                    '$totalCalls'
                   ]
                 },
                 else: 0
@@ -2520,11 +2529,12 @@ class DatabaseController {
                 else: 0
               }
             },
+            // Replace null scores with 0 for proper calculation
             successScores: {
-              $filter: {
+              $map: {
                 input: '$successScores',
                 as: 'score',
-                cond: { $ne: ['$$score', null] }
+                in: { $ifNull: ['$$score', 0] }
               }
             }
           }
@@ -2541,7 +2551,7 @@ class DatabaseController {
             avgCallDuration: 1,
             cumulativeSuccessRate: {
               $cond: {
-                if: { $gt: [{ $size: '$successScores' }, 0] },
+                if: { $gt: ['$totalCalls', 0] },
                 then: {
                   $divide: [
                     { $reduce: {
@@ -2549,7 +2559,7 @@ class DatabaseController {
                       initialValue: 0,
                       in: { $add: ['$$value', '$$this'] }
                     }},
-                    { $size: '$successScores' }
+                    '$totalCalls'
                   ]
                 },
                 else: 0
