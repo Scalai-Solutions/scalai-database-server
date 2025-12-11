@@ -2098,13 +2098,18 @@ class DatabaseController {
               $cond: {
                 if: { $gt: ['$totalCalls', 0] },
                 then: {
-                  $divide: [
-                    { $reduce: {
-                      input: '$successScores',
-                      initialValue: 0,
-                      in: { $add: ['$$value', '$$this'] }
-                    }},
-                    '$totalCalls'
+                  $multiply: [
+                    {
+                      $divide: [
+                        { $reduce: {
+                          input: '$successScores',
+                          initialValue: 0,
+                          in: { $add: ['$$value', '$$this'] }
+                        }},
+                        '$totalCalls'
+                      ]
+                    },
+                    100
                   ]
                 },
                 else: 0
@@ -2553,13 +2558,18 @@ class DatabaseController {
               $cond: {
                 if: { $gt: ['$totalCalls', 0] },
                 then: {
-                  $divide: [
-                    { $reduce: {
-                      input: '$successScores',
-                      initialValue: 0,
-                      in: { $add: ['$$value', '$$this'] }
-                    }},
-                    '$totalCalls'
+                  $multiply: [
+                    {
+                      $divide: [
+                        { $reduce: {
+                          input: '$successScores',
+                          initialValue: 0,
+                          in: { $add: ['$$value', '$$this'] }
+                        }},
+                        '$totalCalls'
+                      ]
+                    },
+                    100
                   ]
                 },
                 else: 0
