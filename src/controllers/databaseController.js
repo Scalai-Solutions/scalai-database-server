@@ -249,23 +249,23 @@ class DatabaseController {
       - Do NOT ask permission - just call the function immediately
       
       RESPONSE HANDLING - CRITICAL RULES:
-      After receiving function result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
+      After receiving function result, you MUST SILENTLY transition. DO NOT announce the result.
       
       If slot is AVAILABLE:
-      - Say: "That's available." or "Yes, that works."
-      - IMMEDIATELY transition to slot_confirmation_state in the same response
-      - DO NOT wait for user confirmation
+      - DO NOT say anything - remain completely silent
+      - IMMEDIATELY transition to slot_confirmation_state (silent transition)
+      - The next state will handle the response
       
       If slot is NOT AVAILABLE:
-      - Say: "Not available. Finding alternatives."
-      - IMMEDIATELY transition to fallback_search_state in the same response
-      - DO NOT wait for user input - the next state will handle searching
+      - DO NOT say anything - remain completely silent
+      - IMMEDIATELY transition to fallback_search_state (silent transition)
+      - The next state will handle finding alternatives
       
       CRITICAL RULES:
-      1. ALWAYS respond after receiving tool result - NEVER go silent
-      2. ALWAYS transition in the same turn as your response
-      3. NEVER wait for user input after a tool call
-      4. If tool call fails or times out, say "Let me try a different approach" and transition to fallback_search_state`,
+      1. DO NOT announce availability - remain completely silent
+      2. DO NOT say "That's available" or "It's available" or describe the result
+      3. IMMEDIATELY transition after tool completes - NO speech whatsoever
+      4. If tool call fails or times out, silently transition to fallback_search_state`,
             tools: [
               {
                 type: "custom",
@@ -4121,23 +4121,23 @@ class DatabaseController {
       - Do NOT ask permission - just call the function immediately
       
       RESPONSE HANDLING - CRITICAL RULES:
-      After receiving function result, you MUST respond AND transition in the SAME turn. NEVER wait for user input.
+      After receiving function result, you MUST SILENTLY transition. DO NOT announce the result.
       
       If slot is AVAILABLE:
-      - Say: "Great! That slot on [day], [date] at [time] is available."
-      - IMMEDIATELY transition to slot_confirmation_state in the same response
-      - DO NOT wait for user confirmation
+      - DO NOT say anything - remain completely silent
+      - IMMEDIATELY transition to slot_confirmation_state (silent transition)
+      - The next state will handle the response
       
       If slot is NOT AVAILABLE:
-      - Say: "Unfortunately, that specific time isn't available. Let me find some nearby alternatives for you."
-      - IMMEDIATELY transition to fallback_search_state in the same response
-      - DO NOT wait for user input - the next state will handle searching
+      - DO NOT say anything - remain completely silent
+      - IMMEDIATELY transition to fallback_search_state (silent transition)
+      - The next state will handle finding alternatives
       
       CRITICAL RULES:
-      1. ALWAYS respond after receiving tool result - NEVER go silent
-      2. ALWAYS transition in the same turn as your response
-      3. NEVER wait for user input after a tool call
-      4. If tool call fails or times out, say "Let me try a different approach" and transition to fallback_search_state`,
+      1. DO NOT announce availability - remain completely silent
+      2. DO NOT say "That's available" or "It's available" or describe the result
+      3. IMMEDIATELY transition after tool completes - NO speech whatsoever
+      4. If tool call fails or times out, silently transition to fallback_search_state`,
             tools: [
               {
                 type: "custom",
