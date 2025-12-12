@@ -4,6 +4,7 @@ const router = express.Router();
 // Import controllers
 const DatabaseController = require('../controllers/databaseController');
 
+
 // Import middleware
 const { authenticateToken, requestLogger } = require('../middleware/authMiddleware');
 const { authenticateTokenOrService } = require('../middleware/serviceAuthMiddleware');
