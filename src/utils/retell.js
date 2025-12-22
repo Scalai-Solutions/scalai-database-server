@@ -194,6 +194,44 @@ class Retell {
   }
 
   /**
+   * Create a new chat agent with the provided configuration
+   * Uses the dedicated chatAgent.create() API endpoint
+   * @param {Object} chatAgentConfig - Chat agent configuration object
+   * @param {Object} chatAgentConfig.response_engine - Response engine configuration
+   * @param {string} chatAgentConfig.response_engine.llm_id - The LLM ID to use
+   * @param {string} chatAgentConfig.response_engine.type - The response engine type (e.g., 'retell-llm')
+   * @returns {Promise<Object>} The created chat agent object with agent_id
+   */
+  async createChatAgent(chatAgentConfig) {
+    try {
+      Logger.info('Creating chat agent', {
+        llmId: chatAgentConfig.response_engine?.llm_id,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const chatAgentResponse = await this.client.chatAgent.create(chatAgentConfig);
+      
+      Logger.info('Chat agent created successfully', {
+        agentId: chatAgentResponse.agent_id,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return chatAgentResponse;
+    } catch (error) {
+      Logger.error('Failed to create chat agent', {
+        llmId: chatAgentConfig.response_engine?.llm_id,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message,
+        stack: error.stack
+      });
+      throw new Error(`Failed to create chat agent: ${error.message}`);
+    }
+  }
+
+  /**
    * Delete an agent by ID
    * @param {string} agentId - The agent ID to delete
    * @returns {Promise<void>}

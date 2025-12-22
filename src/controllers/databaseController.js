@@ -3382,52 +3382,15 @@ class DatabaseController {
         throw new Error('Webhook URL not configured. Please set RETELL_WEBHOOK_URL in environment variables.');
       }
 
-      const agentConfig = {
-        version: 0,
+      // Use chatAgent.create() API for direct chat agent creation
+      const chatAgentConfig = {
         response_engine: {
           type: "retell-llm",
-          llm_id: llmId,
-          version: 0
-        },
-        agent_name: name,
-        channel: "chat",
-        language: "en-US",
-        webhook_url: webhookUrl,
-        boosted_keywords: [],
-        opt_out_sensitive_data_storage: false,
-        opt_in_signed_url: true,
-        normalize_for_speech: true,
-        end_chat_after_silence_ms: 86400000,
-        post_chat_analysis_data: [
-          {
-            type: "string",
-            name: "customer_name",
-            description: "The name of the customer.",
-            examples: ["John Doe", "Jane Smith"]
-          },
-          {
-            name: "appointment_booked",
-            description: "Set to true if the customer has booked an appointment else false",
-            type: "boolean",
-            examples: ["true", "false"]
-          },
-          {
-            name: "appointment_description",
-            description: "The description of the appointment",
-            type: "string",
-            examples: ["Appointment booked for 10:00 AM on 10th June 2025"]
-          },
-          {
-            name: "appointment_id",
-            description: "The id of the appointment",
-            type: "string",
-            examples: ["123"]
-          }
-        ],
-        post_chat_analysis_model: "gpt-4o-mini"
+          llm_id: llmId
+        }
       };
 
-      const agentResponse = await retell.createAgent(agentConfig);
+      const agentResponse = await retell.createChatAgent(chatAgentConfig);
       agentId = agentResponse.agent_id;
 
       Logger.info('Chat agent created successfully', {
