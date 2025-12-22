@@ -139,6 +139,16 @@ class DatabaseController {
             mcp_id: mcpId,
             type: "mcp",
             speak_during_execution: true
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "get_current_time",
+            description: "Get the current date and time in the subaccount's timezone. Returns formatted date, time, weekday, and timezone info.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
           }
         ],
         states: [
@@ -3298,6 +3308,16 @@ class DatabaseController {
             mcp_id: mcpId,
             type: "mcp",
             speak_during_execution: true
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "get_current_time",
+            description: "Get the current date and time in the subaccount's timezone. Returns formatted date, time, weekday, and timezone info.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
           }
         ],
         states: [
