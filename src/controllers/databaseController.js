@@ -196,7 +196,7 @@ class DatabaseController {
              query_params:{
                 
              },
-             url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
+             url: `${config.retell.schedulerMcpUrl}/mcp` || "https://858a25ed3987.ngrok-free.app/mcp",
              timeout_ms:60000
           }
        ]
