@@ -144,7 +144,7 @@ class DatabaseController {
         states: [
           {
             name: "general_state",
-            state_prompt: "You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
+            state_prompt: "Your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes.  You are a helpful AI assistant for handling customer inquiries and requests. Communicate naturally and conversationally, as a friendly professional would. Focus on understanding what the customer needs and providing clear, helpful responses. Use simple language and avoid technical jargon unless the customer specifically asks technical questions. Go through all mcp tools you have to get appropriate responses.",
             edges: [],
             tools: [],
             interruption_sensitivity: 1
@@ -186,7 +186,7 @@ class DatabaseController {
       };
       
 
-      
+
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
 
@@ -3303,7 +3303,7 @@ class DatabaseController {
         states: [
           {
             name: "general_state",
-            state_prompt: "You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
+            state_prompt: "Your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes.  You are a helpful AI assistant for handling customer inquiries and requests. Communicate naturally and conversationally, as a friendly professional would. Focus on understanding what the customer needs and providing clear, helpful responses. Use simple language and avoid technical jargon unless the customer specifically asks technical questions. Go through all mcp tools you have to get appropriate responses.",
             edges: [],
             tools: [],
             interruption_sensitivity: 1
