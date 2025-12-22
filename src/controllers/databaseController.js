@@ -60,7 +60,7 @@ class DatabaseController {
       // Get deployed webhook URL from config
       const deployedWebhookUrl = config.retell.deployedWebhookServerUrl || config.webhookServer.deployedUrl || 'https://scalai-b-48660c785242.herokuapp.com';
 
-      // Step 1: Create LLM
+      // Step 1: Create LLM with only end_call tool (no MCP tools yet - we need MCP ID first)
       Logger.info('Creating LLM for agent', { operationId, subaccountId, name });
       
       const llmConfig = {
@@ -73,98 +73,22 @@ class DatabaseController {
         general_prompt: "",
         general_tools: [
           {
-            type:"end_call",
-            name:"end_call",
-            description:"End the call when user has to leave (like says bye) or you are instructed to do so."
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"check_availability",
-            description:"Check available time slots for a specific date. Returns available slots and already booked slots.",
-            response_variables:{
-                
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"get_all_availability",
-            description:"Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"create_appointment",
-            description:"Create a new appointment/meeting. Checks for conflicts with existing meetings.",
-            response_variables:{
-                
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"update_appointment",
-            description:"Update an existing appointment/meeting. Can update any field.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"delete_appointment",
-            description:"Permanently delete an appointment by its ID.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"Checking on it",
-            speak_after_execution:true,
-            name:"get_call_insights",
-            description:"Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:true
+            type: "end_call",
+            name: "end_call",
+            description: "End the call when user has to leave (like says bye) or you are instructed to do so."
           }
         ],
         states: [
           {
-            name:"general_state",
-            state_prompt:"You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
-            edges:[
-               
-            ],
-            tools:[
-               
-            ],
-            interruption_sensitivity:1
+            name: "general_state",
+            state_prompt: "You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
+            edges: [],
+            tools: [],
+            interruption_sensitivity: 1
           }
         ],
         starting_state: "general_state",
-        start_speaker:"agent",
+        start_speaker: "agent",
         default_dynamic_variables: {
           agent_id: "",
           user_preference_day: "",
@@ -188,17 +112,13 @@ class DatabaseController {
         knowledge_base_ids: [],
         mcps: [
           {
-             name:"appointment-scheduler",
-             headers:{
-                
-             },
-             query_params:{
-                
-             },
-             url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
-             timeout_ms:60000
+            name: "appointment-scheduler",
+            headers: {},
+            query_params: {},
+            url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
+            timeout_ms: 60000
           }
-       ]
+        ]
       };
       
 
@@ -215,21 +135,86 @@ class DatabaseController {
         actualMcpId
       });
 
-      // Step 1.5: Update LLM with correct mcp_id in tools (now that we have the actual MCP ID)
+      // Step 1.5: Update LLM to add MCP tools with the correct mcp_id
       if (actualMcpId) {
-        const updatedGeneralTools = llmConfig.general_tools.map(tool => 
-          tool.type === "mcp" ? { ...tool, mcp_id: actualMcpId } : tool
-        );
+        const mcpTools = [
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "check_availability",
+            description: "Check available time slots for a specific date. Returns available slots and already booked slots.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "get_all_availability",
+            description: "Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "create_appointment",
+            description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "update_appointment",
+            description: "Update an existing appointment/meeting. Can update any field.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "delete_appointment",
+            description: "Permanently delete an appointment by its ID.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "Checking on it",
+            speak_after_execution: true,
+            name: "get_call_insights",
+            description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: true
+          }
+        ];
+
+        const updatedGeneralTools = [
+          ...llmConfig.general_tools,
+          ...mcpTools
+        ];
 
         await retell.updateLLM(llmId, {
           general_tools: updatedGeneralTools
         });
 
-        Logger.info('LLM updated with correct mcp_id in tools', {
+        Logger.info('LLM updated with MCP tools', {
           operationId,
           subaccountId,
           llmId,
-          actualMcpId
+          actualMcpId,
+          mcpToolsCount: mcpTools.length
         });
       }
 
@@ -3255,10 +3240,9 @@ class DatabaseController {
       // Get deployed webhook URL from config
       const deployedWebhookUrl = config.retell.deployedWebhookServerUrl || config.webhookServer.deployedUrl || 'https://scalai-b-48660c785242.herokuapp.com';
 
-      // Step 1: Create LLM (same as normal agent)
+      // Step 1: Create LLM with only end_call tool (no MCP tools yet - we need MCP ID first)
       Logger.info('Creating LLM for chat agent', { operationId, subaccountId, name });
       
-      // Use the same comprehensive 10-state configuration as voice agents
       const llmConfig = {
         version: 0,
         model: "gpt-4o-mini",
@@ -3268,99 +3252,23 @@ class DatabaseController {
         begin_message: "",
         general_prompt: "",
         general_tools: [
-          {
-            type:"end_call",
-            name:"end_call",
-            description:"End the call when user has to leave (like says bye) or you are instructed to do so."
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"check_availability",
-            description:"Check available time slots for a specific date. Returns available slots and already booked slots.",
-            response_variables:{
-                
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"get_all_availability",
-            description:"Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"create_appointment",
-            description:"Create a new appointment/meeting. Checks for conflicts with existing meetings.",
-            response_variables:{
-                
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"update_appointment",
-            description:"Update an existing appointment/meeting. Can update any field.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"",
-            speak_after_execution:true,
-            name:"delete_appointment",
-            description:"Permanently delete an appointment by its ID.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:false
-          },
-          {
-            execution_message_description:"Checking on it",
-            speak_after_execution:true,
-            name:"get_call_insights",
-            description:"Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
-            response_variables:{
-               
-            },
-            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
-            type:"mcp",
-            speak_during_execution:true
+              {
+                type: "end_call",
+                name: "end_call",
+            description: "End the call when user has to leave (like says bye) or you are instructed to do so."
           }
         ],
         states: [
           {
-            name:"general_state",
-            state_prompt:"You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
-            edges:[
-               
-            ],
-            tools:[
-               
-            ],
-            interruption_sensitivity:1
+            name: "general_state",
+            state_prompt: "You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
+            edges: [],
+            tools: [],
+            interruption_sensitivity: 1
           }
         ],
         starting_state: "general_state",
-        start_speaker:"agent",
+        start_speaker: "agent",
         default_dynamic_variables: {
           agent_id: "",
           user_preference_day: "",
@@ -3384,17 +3292,13 @@ class DatabaseController {
         knowledge_base_ids: [],
         mcps: [
           {
-             name:"appointment-scheduler",
-             headers:{
-                
-             },
-             query_params:{
-                
-             },
-             url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
-             timeout_ms:60000
+            name: "appointment-scheduler",
+            headers: {},
+            query_params: {},
+            url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
+            timeout_ms: 60000
           }
-       ]
+        ]
       };
 
       const llmResponse = await retell.createLLM(llmConfig);
@@ -3410,21 +3314,86 @@ class DatabaseController {
         actualMcpId
       });
 
-      // Step 1.5: Update LLM with correct mcp_id in tools (now that we have the actual MCP ID)
+      // Step 1.5: Update LLM to add MCP tools with the correct mcp_id
       if (actualMcpId) {
-        const updatedGeneralTools = llmConfig.general_tools.map(tool => 
-          tool.type === "mcp" ? { ...tool, mcp_id: actualMcpId } : tool
-        );
+        const mcpTools = [
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "check_availability",
+            description: "Check available time slots for a specific date. Returns available slots and already booked slots.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "get_all_availability",
+            description: "Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "create_appointment",
+            description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "update_appointment",
+            description: "Update an existing appointment/meeting. Can update any field.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "delete_appointment",
+            description: "Permanently delete an appointment by its ID.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "Checking on it",
+            speak_after_execution: true,
+            name: "get_call_insights",
+            description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
+            response_variables: {},
+            mcp_id: actualMcpId,
+            type: "mcp",
+            speak_during_execution: true
+          }
+        ];
+
+        const updatedGeneralTools = [
+          ...llmConfig.general_tools,
+          ...mcpTools
+        ];
 
         await retell.updateLLM(llmId, {
           general_tools: updatedGeneralTools
         });
 
-        Logger.info('Chat agent LLM updated with correct mcp_id in tools', {
+        Logger.info('Chat agent LLM updated with MCP tools', {
           operationId,
           subaccountId,
           llmId,
-          actualMcpId
+          actualMcpId,
+          mcpToolsCount: mcpTools.length
         });
       }
 
