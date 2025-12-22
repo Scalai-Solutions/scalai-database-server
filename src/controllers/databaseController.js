@@ -70,770 +70,101 @@ class DatabaseController {
         model_high_priority: true,
         tool_call_strict_mode: true,
         begin_message: "",
-        general_prompt: "You are an intelligent appointment scheduling assistant that helps users book meetings efficiently. CRITICAL: Keep ALL responses SHORT - one to two phrases maximum. This is a VOICE call - be concise and natural. NEVER announce state transitions or say things like 'Transitioning to...' or '*Transitioning to...*' - transitions are internal and completely silent.",
-        general_tools: [],
+        general_prompt: "",
+        general_tools: [
+          {
+            type:"end_call",
+            name:"end_call",
+            description:"End the call when user has to leave (like says bye) or you are instructed to do so."
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"check_availability",
+            description:"Check available time slots for a specific date. Returns available slots and already booked slots.",
+            response_variables:{
+                
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"get_all_availability",
+            description:"Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
+            response_variables:{
+               
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"create_appointment",
+            description:"Create a new appointment/meeting. Checks for conflicts with existing meetings.",
+            response_variables:{
+                
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"update_appointment",
+            description:"Update an existing appointment/meeting. Can update any field.",
+            response_variables:{
+               
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"delete_appointment",
+            description:"Permanently delete an appointment by its ID.",
+            response_variables:{
+               
+            },
+            "mcp_id":"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"Checking on it",
+            speak_after_execution:true,
+            name:"get_call_insights",
+            description:"Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
+            response_variables:{
+               
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:true
+          }
+        ],
         states: [
           {
-            name: "general_state",
-            description: "Initial conversation and intent detection state",
-            state_prompt: `Your agent_id is {{agent_id}}. You are in Europe/Madrid timezone. 
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      You are an intelligent appointment scheduling assistant. Your goal is to help users book appointments efficiently.
-      
-      CRITICAL - RESPONSE LENGTH:
-      - Keep ALL responses SHORT - one to two phrases maximum
-      - This is a VOICE call - be concise and natural
-      - Avoid long explanations - get to the point quickly
-      
-      CRITICAL - NO TRANSITION ANNOUNCEMENTS:
-      - NEVER say "Transitioning to..." or "*Transitioning to...*" or any variation
-      - NEVER announce what state you're entering
-      - Transitions are completely internal and SILENT - users don't need to know about them
-      - Just respond naturally - NEVER mention transitions, states, or internal processes
-      
-      INITIAL ASSESSMENT:
-      - Identify if the user wants to schedule an appointment
-      - Listen for scheduling triggers (callback requests, service interest, appointment mentions)
-      - Be proactive but not pushy
-      - If user shows interest, understand their initial preferences
-      
-      TRANSITION RULES:
-      - If user mentions a specific date/time → transition to date_clarification_state
-      - If user asks for availability without specifics → transition to preference_gathering_state
-      - If user needs help understanding options → transition to preference_gathering_state
-      - Default to preference_gathering_state if user wants to schedule but provides no details
-      - If user explicitly wants to end the call or says goodbye → use end_call tool
-      
-      CRITICAL - NEVER GET STUCK:
-      - After EVERY tool call, you MUST respond AND transition in the SAME turn
-      - NEVER wait for user input after a tool call completes
-      - NEVER go silent - ALWAYS provide a response
-      - If a tool call fails, say "Let me try a different approach" and transition to an appropriate state
-      - State transitions are MANDATORY after tool calls - do not wait
-      - If you're unsure what to do, transition to intelligent_search_state or fallback_search_state
-      
-      YOUR ULTIMATE GOAL IS TO BOOK A MEETING - be helpful and guide the conversation towards scheduling.`,
-            tools: [
-              {
-                type: "end_call",
-                name: "end_call",
-                description: "End the call ONLY if user explicitly wants to end or says goodbye before scheduling"
-              }
+            name:"general_state",
+            state_prompt:"You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
+            edges:[
+               
             ],
-            edges: [
-              {
-                destination_state_name: "preference_gathering_state",
-                description: "User expresses interest in scheduling but provides no specific preferences"
-              },
-              {
-                destination_state_name: "date_clarification_state",
-                description: "User mentions a specific date, time, or day of week that needs clarification"
-              }
-            ]
-          },
-          {
-            name: "preference_gathering_state",
-            description: "Collect user's scheduling preferences intelligently",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Gather user's scheduling preferences intelligently:
-      
-      QUESTIONS TO ASK (choose relevant ones based on context):
-      1. "Do you have any preferred days or times in mind?"
-      2. "Are you looking for something this week, next week, or later?"
-      3. "Do you prefer mornings (8am-12pm), afternoons (12pm-5pm), or evenings (5pm-8pm)?"
-      4. "Are there any days that don't work for you?"
-      5. "How urgent is this appointment - do you need something as soon as possible?"
-      
-      INTELLIGENCE RULES:
-      - If user says a weekday (e.g., "Friday") → Note it and IMMEDIATELY transition to date_clarification_state
-      - If user says "next week" → Calculate actual date range (next Monday to Sunday) and IMMEDIATELY transition to intelligent_search_state
-      - If user says "ASAP" or "earliest available" → Note urgency and IMMEDIATELY transition to intelligent_search_state
-      - If user gives a date range → Note both start and end dates and IMMEDIATELY transition to intelligent_search_state
-      - Store preferences in context for later use
-      
-      TRANSITION RULES - IMMEDIATE ACTIONS:
-      When user provides information, IMMEDIATELY transition based on what they said:
-      
-      - Specific date/time mentioned → IMMEDIATELY transition to date_clarification_state
-      - General preferences gathered (or user wants to see what's available) → IMMEDIATELY transition to intelligent_search_state
-      - User is vague and wants to see all options → IMMEDIATELY transition to intelligent_search_state
-      - User says "show me options" or "what's available" → IMMEDIATELY transition to intelligent_search_state
-      
-      CRITICAL:
-      - After gathering enough information to proceed, transition immediately
-      - Don't ask multiple questions if user already provided enough info
-      - If user mentions a specific day/date, go to date_clarification_state
-      - If user gives general preferences or wants to see options, go to intelligent_search_state`,
-            edges: [
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "Preferences gathered or user wants to see available options"
-              },
-              {
-                destination_state_name: "date_clarification_state",
-                description: "User provides specific date/time during preference gathering"
-              }
-            ]
-          },
-          {
-            name: "date_clarification_state",
-            description: "Disambiguate and validate date/time requests",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      You are in Europe/Madrid timezone.
-      
-      CLARIFICATION LOGIC for ambiguous dates:
-      
-      For weekday mentions (Monday, Tuesday, etc.):
-      - Calculate if it's this week or next week
-      - Ask: "Do you mean this [Day] ([specific date]) or next [Day] ([specific date])?"
-      - Example: If today is Wednesday and user says "Friday", clarify "this Friday November 22nd or next Friday November 29th?"
-      
-      For relative dates:
-      - "Tomorrow" → Calculate and confirm exact date
-      - "Next week" → Clarify the date range (next Monday to Sunday)
-      - "In 2 weeks" → Calculate and confirm exact date
-      - "End of month" → Calculate last days of current month
-      
-      IMPORTANT:
-      - Always confirm the interpreted date with user
-      - Check that date is not in the past
-      - Be explicit about dates to avoid confusion
-      - Store clarified date/time for next state
-      
-      TRANSITION RULES - IMMEDIATE ACTIONS:
-      After user clarifies or confirms the date, IMMEDIATELY transition:
-      
-      - If specific time slot is clarified (date + time) → IMMEDIATELY transition to check_availability_state
-      - If only date is clarified (no specific time) → IMMEDIATELY transition to intelligent_search_state
-      - If date range is clarified → IMMEDIATELY transition to intelligent_search_state
-      
-      CRITICAL:
-      - After user confirms/clarifies, transition immediately - don't ask follow-up questions
-      - Store the clarified date/time before transitioning
-      - If user provides both date and time, go to check_availability_state
-      - If user provides only date or date range, go to intelligent_search_state`,
-            edges: [
-              {
-                destination_state_name: "check_availability_state",
-                description: "Specific date and time slot has been clarified and confirmed"
-              },
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "Date clarified but no specific time, need to search for slots"
-              }
-            ]
-          },
-          {
-            name: "check_availability_state",
-            description: "Verify if a specific slot is available",
-            state_prompt: `You are in Europe/Madrid timezone.
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      Check availability for the specific slot requested using check_availability function.
-      
-      CRITICAL - RESPONSE LENGTH:
-      - Keep responses SHORT - one to two phrases maximum
-      - This is a VOICE call - be concise
-      
-      FUNCTION USAGE:
-      - IMMEDIATELY call check_availability with the exact date and time the user requested
-      - Date format: YYYY-MM-DD
-      - Time format: HH:mm (24-hour)
-      - All times must be in Europe/Madrid timezone
-      - Do NOT ask permission - just call the function immediately
-      
-      RESPONSE HANDLING - CRITICAL RULES:
-      After receiving function result, you MUST SILENTLY transition. DO NOT announce the result.
-      
-      If slot is AVAILABLE:
-      - DO NOT say anything - remain completely silent
-      - IMMEDIATELY transition to slot_confirmation_state (silent transition)
-      - The next state will handle the response
-      
-      If slot is NOT AVAILABLE:
-      - DO NOT say anything - remain completely silent
-      - IMMEDIATELY transition to fallback_search_state (silent transition)
-      - The next state will handle finding alternatives
-      
-      CRITICAL RULES:
-      1. DO NOT announce availability - remain completely silent
-      2. DO NOT say "That's available" or "It's available" or describe the result
-      3. IMMEDIATELY transition after tool completes - NO speech whatsoever
-      4. If tool call fails or times out, silently transition to fallback_search_state`,
-            tools: [
-              {
-                type: "custom",
-                name: "check_availability",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Check if a specific time slot is available for booking an appointment",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "Date in YYYY-MM-DD format"
-                    },
-                    startTime: {
-                      type: "string",
-                      description: "Start time in HH:mm format (24-hour)"
-                    },
-                    endTime: {
-                      type: "string",
-                      description: "End time in HH:mm format (24-hour)"
-                    }
-                  },
-                  required: ["date", "startTime", "endTime"]
-                },
-                execution_message_description: "Checking availability for the appointment",
-                timeout_ms: 120000
-              }
+            tools:[
+               
             ],
-            edges: [
-              {
-                destination_state_name: "slot_confirmation_state",
-                description: "The requested slot is available"
-              },
-              {
-                destination_state_name: "fallback_search_state",
-                description: "The requested slot is not available, need to find alternatives"
-              }
-            ]
-          },
-          {
-            name: "intelligent_search_state",
-            description: "Smart search for available slots based on preferences",
-            state_prompt: `You are in Europe/Madrid timezone.
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      CRITICAL - RESPONSE LENGTH:
-      - Keep responses SHORT - one to two phrases maximum
-      - This is a VOICE call - be concise
-      
-      CRITICAL - IMMEDIATE ACTION:
-      - When entering this state, IMMEDIATELY call nearest_available_slots function
-      - Do NOT wait for user input - call the tool right away
-      - The function searches 30 days forward from startDate
-      
-      SEARCH STRATEGY:
-      1. SPECIFIC DAY (e.g., "Monday", "this Friday"): Start from that date (calculate actual date)
-      2. DATE RANGE (e.g., "second week"): Start from beginning of that range
-      3. ASAP/URGENT: Start from today
-      4. TIME PREFERENCE: Filter results after receiving them (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
-      
-      CRITICAL - READING RESPONSE:
-      - Your startDate parameter is ONLY the search starting point
-      - The RESPONSE contains actual slot details with: date, day, startTime, endTime
-      - DO NOT assume slots are on the startDate you passed
-      - ALWAYS read and use the actual date/day/time from each slot in the response
-      - If user asked for "Monday" and response shows slots with day="Monday", those ARE Monday slots
-      
-      AFTER TOOL CALL - MANDATORY ACTIONS:
-      After receiving tool result, you MUST respond AND transition in the SAME turn:
-      
-      If slots found:
-      - Present results briefly: "Monday December 1st at 9 AM, 10 AM, or 11 AM. Which works?"
-      - Keep it SHORT - one phrase with 2-3 options max
-      - Always include the actual date (December 1st), not just "Monday"
-      - For evening preference: Filter to 5pm-8pm slots only
-      - Don't list more than 3 options at once
-      - IMMEDIATELY transition to slot_selection_state
-      - DO NOT wait for user input - transition happens in same turn
-      
-      If NO slots found (empty array):
-      - IMMEDIATELY transition to fallback_search_state
-      - DO NOT wait for user input
-      
-      ONE CALL RULE:
-      - Make ONE call, get results for 30 days
-      - DON'T make consecutive calls for nearby dates - already covered!
-      - Only make a second call if NO results found (extend by 30 days) - but transition to fallback_search_state first
-      
-      IMPORTANT: 
-      - NEVER mention function names
-      - Keep it conversational and brief
-      - ALWAYS respond after tool call - NEVER go silent
-      - ALWAYS transition immediately after presenting results`,
-            tools: [
-              {
-                type: "custom",
-                name: "nearest_available_slots",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Find the nearest available appointment slots within 30 days from start date",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    startDate: {
-                      type: "string",
-                      description: "Starting date to search from (YYYY-MM-DD)"
-                    },
-                    count: {
-                      type: "number",
-                      description: "Number of available slots to return (default: 5)"
-                    },
-                    durationMinutes: {
-                      type: "number",
-                      description: "Duration of each slot in minutes (default: 60)"
-                    }
-                  },
-                  required: ["startDate"]
-                },
-                execution_message_description: "Finding available time slots for you",
-                timeout_ms: 120000
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "slot_selection_state",
-                description: "Available slots found, present them to user for selection"
-              },
-              {
-                destination_state_name: "fallback_search_state",
-                description: "No slots found in initial search, need to expand search parameters"
-              }
-            ]
-          },
-          {
-            name: "slot_selection_state",
-            description: "Help user choose from available slots",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Present available slots briefly to help user select.
-      
-      PRESENTATION (Keep SHORT for voice):
-      
-      For 1-3 slots:
-      - "I have Monday December 1st at 9 AM, Tuesday December 2nd at 2 PM, or Wednesday December 3rd at 10 AM. Which works?"
-      - Always include the actual date, not just the day
-      
-      For 4-8 slots:
-      - Group by day: "On Monday December 1st I have 9 AM and 2 PM. On Tuesday December 2nd I have 10 AM and 3 PM. Which day?"
-      
-      For 9+ slots:
-      - "The earliest is Monday December 1st at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
-      
-      USER RESPONSE HANDLING - IMMEDIATE TRANSITIONS:
-      When user responds, IMMEDIATELY transition based on their response:
-      
-      - User selects a slot (says "first slot", "second slot", "book the first one", "book the second slot", "that one", mentions date/time) → 
-        * DO NOT say "Great choice" or "Let me confirm" or anything
-        * DO NOT speak - just IMMEDIATELY transition to slot_confirmation_state
-        * Store selected slot details before transitioning
-      - User wants different options (says "different", "other", "more") → IMMEDIATELY transition to intelligent_search_state
-      - User mentions a NEW time not in your list → IMMEDIATELY transition to check_availability_state
-      
-      CRITICAL RULES:
-      1. After presenting slots, WAIT for user response (this state has no tools, so waiting is correct)
-      2. When user selects a slot, transition IMMEDIATELY - DO NOT say anything before transitioning
-      3. DO NOT say "Great choice" or "Let me confirm" - just transition silently
-      4. Store selected slot details before transitioning
-      
-      IMPORTANT:
-      - Keep it natural and brief
-      - Store selected slot details (date, startTime, endTime)`,
-            edges: [
-              {
-                destination_state_name: "slot_confirmation_state",
-                description: "User has selected a specific slot from the options"
-              },
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "User wants to see different options or change search parameters"
-              },
-              {
-                destination_state_name: "check_availability_state",
-                description: "User mentions a specific slot not in the presented options"
-              }
-            ]
-          },
-          {
-            name: "fallback_search_state",
-            description: "Handle cases when initial searches fail or slots unavailable",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Handle when slots unavailable or no results found.
-      
-      CRITICAL - IMMEDIATE ACTION REQUIRED:
-      - When entering this state, IMMEDIATELY call nearest_available_slots function
-      - Do NOT wait for user input - call the tool right away
-      - Search from the date that was requested (or today if no specific date)
-      
-      CRITICAL - ONE CALL SEARCHES 30 DAYS:
-      - nearest_available_slots searches 30 days forward from startDate
-      - DON'T make multiple calls for same range
-      - Only make new call if extending search window
-      
-      FALLBACK STRATEGIES:
-      1. SPECIFIC SLOT unavailable: Search from that date (ONE call covers 30 days)
-      2. NO SLOTS in range: Extend search by 30 days forward (add 30 days to startDate)
-      3. Maximum: 2 search attempts (60 days) before suggesting direct contact
-      
-      READING RESPONSE - CRITICAL:
-      - Response has actual slot data: date, day, startTime, endTime
-      - Use these exact values, don't assume dates
-      - ALWAYS read the actual date/day from each slot in the response
-      - If user asked for Monday and slots show Monday dates, those ARE available on Monday
-      
-      AFTER TOOL CALL - MANDATORY ACTIONS:
-      After receiving tool result, you MUST respond AND transition in the SAME turn:
-      
-      If slots found:
-      - Say: "I found some alternatives: [list 3-5 slots with dates and times]"
-      - IMMEDIATELY transition to slot_selection_state
-      - DO NOT wait for user input
-      
-      If NO slots found (empty array or error):
-      - If this is first attempt: Extend search by 30 days and call tool again
-      - If second attempt also fails: Say "I'm having trouble finding available slots in the next 60 days. Would you like me to check a specific date range, or would you prefer to contact us directly?"
-      - Wait for user response (this is the ONLY case where you wait)
-      
-      PRESENTING (Keep brief):
-      - "That's not available, but I have Monday December 1st at 2 PM or Tuesday December 2nd at 10 AM"
-      - Always include the actual date, not just the day
-      - Brief and actionable
-      
-      IMPORTANT:
-      - Never mention function names
-      - Keep it conversational
-      - ALWAYS respond after tool call - NEVER go silent
-      - ALWAYS transition immediately after presenting slots`,
-            tools: [
-              {
-                type: "custom",
-                name: "nearest_available_slots",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Find the nearest available appointment slots within 30 days from start date",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    startDate: {
-                      type: "string",
-                      description: "Starting date to search from (YYYY-MM-DD)"
-                    },
-                    count: {
-                      type: "number",
-                      description: "Number of available slots to return (default: 5)"
-                    },
-                    durationMinutes: {
-                      type: "number",
-                      description: "Duration of each slot in minutes (default: 60)"
-                    }
-                  },
-                  required: ["startDate"]
-                },
-                execution_message_description: "Searching for alternative time slots",
-                timeout_ms: 120000
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "slot_selection_state",
-                description: "Alternative slots found, present them to user"
-              },
-              {
-                destination_state_name: "slot_confirmation_state",
-                description: "User accepts a suggested alternative slot"
-              }
-            ]
-          },
-          {
-            name: "slot_confirmation_state",
-            description: "Confirm slot selection before booking",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      YOU ARE IN THIS STATE BECAUSE THE USER HAS ALREADY SELECTED A SLOT.
-      Your ONLY job is to verify availability and proceed to booking.
-      
-      UPON ENTERING THIS STATE:
-      - IMMEDIATELY call check_availability function - DO NOT say anything first
-      - Use the selected slot details (date, startTime, endTime) from context
-      - DO NOT say "Great choice" or "Let me confirm" or "hold on" - just call the tool silently
-      - DO NOT ask for confirmation - the user already selected the slot
-      
-      MANDATORY: AFTER TOOL CALL COMPLETES, YOU MUST RESPOND IMMEDIATELY IN THE SAME TURN.
-      When check_availability tool finishes executing, you will receive a tool result with an "available" field.
-      As soon as you receive this tool result, you MUST AUTOMATICALLY:
-      1. Read the "available" field (true or false)
-      2. IMMEDIATELY respond with your message (do not wait, do not pause)
-      3. IMMEDIATELY transition to the next state in the same response
-      This is AUTOMATIC - you do not need user input. The tool result triggers your response.
-      DO NOT wait for user to say anything. DO NOT pause. Respond immediately after tool completes.
-      
-      If available=true:
-      - Say ONLY: "Perfect! What's your name?"
-      - IMMEDIATELY transition to booking_details_state in the SAME response
-      
-      If available=false:
-      - Say: "That slot's taken. Let me find alternatives."
-      - IMMEDIATELY transition to fallback_search_state in the SAME response
-      
-      CRITICAL - AUTOMATIC RESPONSE REQUIRED:
-      1. When entering this state, call check_availability IMMEDIATELY - NO speech before tool
-      2. When tool result arrives, respond IMMEDIATELY - do this automatically, no waiting
-      3. Transition IMMEDIATELY in the same turn as your response
-      4. NEVER wait for user input after tool execution
-      5. NEVER say "hold on" or "please wait" - just call tool, then respond
-      6. Keep responses SHORT and natural
-      
-      If user wants to change (says "no", "change", "different"):
-      - Say: "No problem, let me show other options."
-      - Transition to intelligent_search_state
-      
-      Store confirmed slot details (date, startTime, endTime) in dynamic variables.`,
-            tools: [
-              {
-                type: "custom",
-                name: "check_availability",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/check-availability",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Check if the slot is still available. Returns {available: true/false}",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "Date in YYYY-MM-DD format"
-                    },
-                    startTime: {
-                      type: "string",
-                      description: "Start time in HH:mm format (24-hour)"
-                    },
-                    endTime: {
-                      type: "string",
-                      description: "End time in HH:mm format (24-hour)"
-                    }
-                  },
-                  required: ["date", "startTime", "endTime"]
-                },
-                timeout_ms: 120000
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "booking_details_state",
-                description: "User confirmed and slot is still available"
-              },
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "User wants to change the selected slot"
-              },
-              {
-                destination_state_name: "fallback_search_state",
-                description: "Slot is no longer available, need alternatives"
-              }
-            ]
-          },
-          {
-            name: "booking_details_state",
-            description: "Collect user details and complete booking",
-            state_prompt: `You are in Europe/Madrid timezone.
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      You are now in the booking phase. Your goal is to collect details and complete the booking.
-      
-      STEP-BY-STEP PROCESS:
-      
-      1. NAME COLLECTION:
-         - Ask: "What's your name?"
-         - Get spelling if unclear: "Could you spell that?"
-         - Confirm: "That's [SPELL LETTER BY LETTER: A... S... H... O... K]. Correct?"
-         - Speak naturally, pause between letters
-      
-      2. EMAIL COLLECTION:
-         - Ask: "What's your email?"
-         - Confirm: "[SPELL EMAIL COMPLETELY]"
-         - For common domains say: "at gmail dot com" or "at outlook dot com"
-      
-      3. PHONE COLLECTION:
-         - Ask: "And your phone number?"
-         - Confirm: "[SAY EACH DIGIT: 6... 5... 5... 1... 2... 3... 4... 5... 6... 7]. Right?"
-      
-      4. BOOKING EXECUTION:
-         - Once ALL THREE details are confirmed (name, email, phone), IMMEDIATELY call book_appointment function
-         - Use the previously confirmed date and time slot
-         - Include meeting title like "Appointment with [customer name]"
-         - Do NOT wait or ask anything else - just call the tool immediately
-      
-      AFTER BOOKING TOOL CALL - MANDATORY ACTIONS:
-      After receiving book_appointment result, you MUST respond in the SAME turn. NEVER wait for user input.
-      
-      If booking SUCCESS (response has meeting id or success=true):
-      - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
-      - Say: "Done! Set for [DATE] at [TIME]. Email confirmation coming."
-      - Ask: "Anything else?"
-      - WAIT for user response (this is the ONLY case where you wait after a tool call)
-      - If user says no/nothing → use end_call tool
-      - If user wants another appointment → transition to preference_gathering_state
-      
-      If booking FAILS (error, no meeting id, success=false):
-      - Say: "Issue booking. Finding another slot."
-      - IMMEDIATELY transition to error_recovery_state in the SAME response
-      - DO NOT wait for user input
-      
-      CRITICAL RULES:
-      1. Call book_appointment IMMEDIATELY when you have all 3 details
-      2. After tool returns, ALWAYS respond in the same turn
-      3. If booking succeeds, wait for user response (only exception)
-      4. If booking fails, transition immediately - do not wait
-      5. NEVER go silent after a tool call
-      6. Keep responses SHORT - one to two phrases maximum`,
-            tools: [
-              {
-                type: "custom",
-                name: "book_appointment",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/book-appointment",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Book an appointment at the confirmed time slot",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "Appointment date (YYYY-MM-DD)"
-                    },
-                    startTime: {
-                      type: "string",
-                      description: "Start time (HH:mm, 24-hour format)"
-                    },
-                    endTime: {
-                      type: "string",
-                      description: "End time (HH:mm, 24-hour format)"
-                    },
-                    title: {
-                      type: "string",
-                      description: "Meeting title"
-                    },
-                    description: {
-                      type: "string",
-                      description: "Meeting description"
-                    },
-                    customerName: {
-                      type: "string",
-                      description: "Customer's name"
-                    },
-                    customerEmail: {
-                      type: "string",
-                      description: "Customer's email address"
-                    },
-                    customerPhone: {
-                      type: "string",
-                      description: "Customer's phone number"
-                    },
-                    notes: {
-                      type: "string",
-                      description: "Additional notes"
-                    }
-                  },
-                  required: ["date", "startTime", "endTime", "title"]
-                },
-                execution_message_description: "Booking your appointment",
-                timeout_ms: 120000
-              },
-              {
-                type: "end_call",
-                name: "end_call",
-                description: "End the call ONLY after successful booking and user confirms they don't need anything else"
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "error_recovery_state",
-                description: "Booking failed, need to handle error"
-              },
-              {
-                destination_state_name: "preference_gathering_state",
-                description: "User wants to book another appointment"
-              }
-            ]
-          },
-          {
-            name: "error_recovery_state",
-            description: "Handle errors gracefully and recover",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Handle any errors that occur during the booking process gracefully.
-      
-      CRITICAL - RESPONSE LENGTH:
-      - Keep responses SHORT - one to two phrases maximum
-      - This is a VOICE call - be concise
-      
-      ERROR TYPES AND RESPONSES:
-      
-      1. BOOKING FAILURE (from booking_details_state):
-         - Say: "Issue booking. Finding another slot."
-         - IMMEDIATELY transition to intelligent_search_state with saved preferences
-         - DO NOT wait for user input - transition happens immediately
-      
-      2. SYSTEM UNAVAILABLE:
-         - Say: "System issue. Try again or contact us?"
-         - WAIT for user response (this is one case where waiting is appropriate)
-         - If user says "try again" → transition back to booking_details_state
-         - If user says "contact" or "no" → provide contact info and ask if they want to end call
-      
-      3. INVALID DATA:
-         - Say: "Issue with info. Collecting again."
-         - IMMEDIATELY transition to booking_details_state
-         - DO NOT wait for user input
-      
-      4. NETWORK/TIMEOUT:
-         - Say: "Taking longer. Try again?"
-         - WAIT for user response
-         - If user says yes → transition back to booking_details_state
-         - If user says no → provide alternative contact method
-      
-      RECOVERY ACTIONS:
-      - Always maintain positive, helpful tone
-      - Preserve all previously collected information
-      - Offer alternatives (different slot, call directly, try again)
-      - Never leave user without a path forward
-      - If user explicitly wants to end call or give up, use end_call tool
-      
-      TRANSITIONS - CRITICAL RULES:
-      - For slot-related issues → IMMEDIATELY transition to intelligent_search_state (no waiting)
-      - For data collection issues → IMMEDIATELY transition to booking_details_state (no waiting)
-      - For temporary issues that require retry → WAIT for user confirmation first, then transition
-      - If user wants to end call → use end_call tool
-      - ALWAYS respond immediately - never go silent
-      - Only wait for user input when explicitly asking if they want to retry`,
-            tools: [
-              {
-                type: "end_call",
-                name: "end_call",
-                description: "End the call ONLY if user explicitly wants to give up or end the call after multiple errors"
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "Need to find a new slot after booking failure"
-              },
-              {
-                destination_state_name: "booking_details_state",
-                description: "Need to re-collect information"
-              }
-            ]
+            interruption_sensitivity:1
           }
         ],
         starting_state: "general_state",
+        start_speaker:"agent",
         default_dynamic_variables: {
           agent_id: "",
           user_preference_day: "",
@@ -854,7 +185,21 @@ class DatabaseController {
           search_iterations: "0",
           failed_slot_request: ""
         },
-        knowledge_base_ids: []
+        knowledge_base_ids: [],
+        mcps: [
+          {
+             name:"appointment-scheduler",
+             headers:{
+                
+             },
+             id:"mcp-1766245087377",
+             query_params:{
+                
+             },
+             url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
+             timeout_ms:60000
+          }
+       ]
       };
       
 
@@ -878,6 +223,7 @@ class DatabaseController {
           version: 0
         },
         agent_name: name,
+        channel:"voice",
         voice_id: "11labs-Adrian",
         voice_model: "eleven_turbo_v2",
         fallback_voice_ids: ["openai-Alloy", "deepgram-Angus"],
@@ -964,8 +310,13 @@ class DatabaseController {
         const updatedLlmConfig = {
           general_tools: llmConfig.general_tools,
           states: [
-            // State 0: general_state (has end_call tool)
-            llmConfig.states[0],
+            // State 0: general_state (has end_call tool) - update state_prompt with actual IDs
+            {
+              ...llmConfig.states[0],
+              state_prompt: llmConfig.states[0].state_prompt
+                .replace('{{AGENT_ID}}', agentId)
+                .replace('{{SUBACCOUNT_ID}}', subaccountId)
+            },
             // State 1: preference_gathering_state (no tools)
             llmConfig.states[1],
             // State 2: date_clarification_state (no tools)
@@ -3948,763 +3299,101 @@ class DatabaseController {
         model_high_priority: true,
         tool_call_strict_mode: true,
         begin_message: "",
-        general_prompt: "You are an intelligent appointment scheduling assistant that helps users book meetings efficiently. This is a CHAT conversation - you can provide more detailed responses than voice calls. Be helpful and clear. CRITICAL: NEVER announce state transitions or say things like '*Transitioning to...*' - transitions are internal and silent.",
-        general_tools: [],
+        general_prompt: "",
+        general_tools: [
+          {
+            type:"end_call",
+            name:"end_call",
+            description:"End the call when user has to leave (like says bye) or you are instructed to do so."
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"check_availability",
+            description:"Check available time slots for a specific date. Returns available slots and already booked slots.",
+            response_variables:{
+                
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"get_all_availability",
+            description:"Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
+            response_variables:{
+               
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"create_appointment",
+            description:"Create a new appointment/meeting. Checks for conflicts with existing meetings.",
+            response_variables:{
+                
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"update_appointment",
+            description:"Update an existing appointment/meeting. Can update any field.",
+            response_variables:{
+               
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"",
+            speak_after_execution:true,
+            name:"delete_appointment",
+            description:"Permanently delete an appointment by its ID.",
+            response_variables:{
+               
+            },
+            "mcp_id":"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:false
+          },
+          {
+            execution_message_description:"Checking on it",
+            speak_after_execution:true,
+            name:"get_call_insights",
+            description:"Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
+            response_variables:{
+               
+            },
+            mcp_id:"mcp-1766245087377",
+            type:"mcp",
+            speak_during_execution:true
+          }
+        ],
         states: [
           {
-            name: "general_state",
-            description: "Initial conversation and intent detection state",
-            state_prompt: `Your agent_id is {{agent_id}}. You are in Europe/Madrid timezone. 
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      You are an intelligent appointment scheduling assistant. Your goal is to help users book appointments efficiently.
-      
-      IMPORTANT: This is a CHAT conversation - users type their responses directly.
-      You can provide more detailed responses than voice calls - be helpful and clear.
-      
-      CRITICAL - NO TRANSITION ANNOUNCEMENTS:
-      - NEVER say "*Transitioning to...*" or any variation
-      - NEVER announce what state you're entering
-      - Transitions are internal - users don't need to know about them
-      - Just respond naturally - don't mention transitions
-      
-      INITIAL ASSESSMENT:
-      - Identify if the user wants to schedule an appointment
-      - Listen for scheduling triggers (callback requests, service interest, appointment mentions)
-      - Be proactive but not pushy
-      - If user shows interest, understand their initial preferences
-      
-      TRANSITION RULES:
-      - If user mentions a specific date/time → transition to date_clarification_state
-      - If user asks for availability without specifics → transition to preference_gathering_state
-      - If user needs help understanding options → transition to preference_gathering_state
-      - Default to preference_gathering_state if user wants to schedule but provides no details
-      - If user explicitly wants to end the call or says goodbye → use end_call tool
-      
-      CRITICAL - NEVER GET STUCK:
-      - After EVERY tool call, you MUST respond AND transition in the SAME turn
-      - NEVER wait for user input after a tool call completes
-      - NEVER go silent - ALWAYS provide a response
-      - If a tool call fails, say "Let me try a different approach" and transition to an appropriate state
-      - State transitions are MANDATORY after tool calls - do not wait
-      - If you're unsure what to do, transition to intelligent_search_state or fallback_search_state
-      
-      YOUR ULTIMATE GOAL IS TO BOOK A MEETING - be helpful and guide the conversation towards scheduling.`,
-            tools: [
-              {
-                type: "end_call",
-                name: "end_call",
-                description: "End the call ONLY if user explicitly wants to end or says goodbye before scheduling"
-              }
+            name:"general_state",
+            state_prompt:"You are an agent to check avaialbility, set and manage apoointments. your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes",
+            edges:[
+               
             ],
-            edges: [
-              {
-                destination_state_name: "preference_gathering_state",
-                description: "User expresses interest in scheduling but provides no specific preferences"
-              },
-              {
-                destination_state_name: "date_clarification_state",
-                description: "User mentions a specific date, time, or day of week that needs clarification"
-              }
-            ]
-          },
-          {
-            name: "preference_gathering_state",
-            description: "Collect user's scheduling preferences intelligently",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Gather user's scheduling preferences intelligently:
-      
-      QUESTIONS TO ASK (choose relevant ones based on context):
-      1. "Do you have any preferred days or times in mind?"
-      2. "Are you looking for something this week, next week, or later?"
-      3. "Do you prefer mornings (8am-12pm), afternoons (12pm-5pm), or evenings (5pm-8pm)?"
-      4. "Are there any days that don't work for you?"
-      5. "How urgent is this appointment - do you need something as soon as possible?"
-      
-      INTELLIGENCE RULES:
-      - If user says a weekday (e.g., "Friday") → Note it and IMMEDIATELY transition to date_clarification_state
-      - If user says "next week" → Calculate actual date range (next Monday to Sunday) and IMMEDIATELY transition to intelligent_search_state
-      - If user says "ASAP" or "earliest available" → Note urgency and IMMEDIATELY transition to intelligent_search_state
-      - If user gives a date range → Note both start and end dates and IMMEDIATELY transition to intelligent_search_state
-      - Store preferences in context for later use
-      
-      TRANSITION RULES - IMMEDIATE ACTIONS:
-      When user provides information, IMMEDIATELY transition based on what they said:
-      
-      - Specific date/time mentioned → IMMEDIATELY transition to date_clarification_state
-      - General preferences gathered (or user wants to see what's available) → IMMEDIATELY transition to intelligent_search_state
-      - User is vague and wants to see all options → IMMEDIATELY transition to intelligent_search_state
-      - User says "show me options" or "what's available" → IMMEDIATELY transition to intelligent_search_state
-      
-      CRITICAL:
-      - After gathering enough information to proceed, transition immediately
-      - Don't ask multiple questions if user already provided enough info
-      - If user mentions a specific day/date, go to date_clarification_state
-      - If user gives general preferences or wants to see options, go to intelligent_search_state`,
-            edges: [
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "Preferences gathered or user wants to see available options"
-              },
-              {
-                destination_state_name: "date_clarification_state",
-                description: "User provides specific date/time during preference gathering"
-              }
-            ]
-          },
-          {
-            name: "date_clarification_state",
-            description: "Disambiguate and validate date/time requests",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      You are in Europe/Madrid timezone.
-      
-      CLARIFICATION LOGIC for ambiguous dates:
-      
-      For weekday mentions (Monday, Tuesday, etc.):
-      - Calculate if it's this week or next week
-      - Ask: "Do you mean this [Day] ([specific date]) or next [Day] ([specific date])?"
-      - Example: If today is Wednesday and user says "Friday", clarify "this Friday November 22nd or next Friday November 29th?"
-      
-      For relative dates:
-      - "Tomorrow" → Calculate and confirm exact date
-      - "Next week" → Clarify the date range (next Monday to Sunday)
-      - "In 2 weeks" → Calculate and confirm exact date
-      - "End of month" → Calculate last days of current month
-      
-      IMPORTANT:
-      - Always confirm the interpreted date with user
-      - Check that date is not in the past
-      - Be explicit about dates to avoid confusion
-      - Store clarified date/time for next state
-      
-      TRANSITION RULES - IMMEDIATE ACTIONS:
-      After user clarifies or confirms the date, IMMEDIATELY transition:
-      
-      - If specific time slot is clarified (date + time) → IMMEDIATELY transition to check_availability_state
-      - If only date is clarified (no specific time) → IMMEDIATELY transition to intelligent_search_state
-      - If date range is clarified → IMMEDIATELY transition to intelligent_search_state
-      
-      CRITICAL:
-      - After user confirms/clarifies, transition immediately - don't ask follow-up questions
-      - Store the clarified date/time before transitioning
-      - If user provides both date and time, go to check_availability_state
-      - If user provides only date or date range, go to intelligent_search_state`,
-            edges: [
-              {
-                destination_state_name: "check_availability_state",
-                description: "Specific date and time slot has been clarified and confirmed"
-              },
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "Date clarified but no specific time, need to search for slots"
-              }
-            ]
-          },
-          {
-            name: "check_availability_state",
-            description: "Verify if a specific slot is available",
-            state_prompt: `You are in Europe/Madrid timezone.
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      Check availability for the specific slot requested using check_availability function.
-      
-      FUNCTION USAGE:
-      - IMMEDIATELY call check_availability with the exact date and time the user requested
-      - Date format: YYYY-MM-DD
-      - Time format: HH:mm (24-hour)
-      - All times must be in Europe/Madrid timezone
-      - Do NOT ask permission - just call the function immediately
-      
-      RESPONSE HANDLING - CRITICAL RULES:
-      After receiving function result, you MUST SILENTLY transition. DO NOT announce the result.
-      
-      If slot is AVAILABLE:
-      - DO NOT say anything - remain completely silent
-      - IMMEDIATELY transition to slot_confirmation_state (silent transition)
-      - The next state will handle the response
-      
-      If slot is NOT AVAILABLE:
-      - DO NOT say anything - remain completely silent
-      - IMMEDIATELY transition to fallback_search_state (silent transition)
-      - The next state will handle finding alternatives
-      
-      CRITICAL RULES:
-      1. DO NOT announce availability - remain completely silent
-      2. DO NOT say "That's available" or "It's available" or describe the result
-      3. IMMEDIATELY transition after tool completes - NO speech whatsoever
-      4. If tool call fails or times out, silently transition to fallback_search_state`,
-            tools: [
-              {
-                type: "custom",
-                name: "check_availability",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/check-availability",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Check if a specific time slot is available for booking an appointment",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "Date in YYYY-MM-DD format"
-                    },
-                    startTime: {
-                      type: "string",
-                      description: "Start time in HH:mm format (24-hour)"
-                    },
-                    endTime: {
-                      type: "string",
-                      description: "End time in HH:mm format (24-hour)"
-                    }
-                  },
-                  required: ["date", "startTime", "endTime"]
-                },
-                execution_message_description: "Checking availability for the appointment",
-                timeout_ms: 120000
-              }
+            tools:[
+               
             ],
-            edges: [
-              {
-                destination_state_name: "slot_confirmation_state",
-                description: "The requested slot is available"
-              },
-              {
-                destination_state_name: "fallback_search_state",
-                description: "The requested slot is not available, need to find alternatives"
-              }
-            ]
-          },
-          {
-            name: "intelligent_search_state",
-            description: "Smart search for available slots based on preferences",
-            state_prompt: `You are in Europe/Madrid timezone.
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      CRITICAL - IMMEDIATE ACTION:
-      - When entering this state, IMMEDIATELY call nearest_available_slots function
-      - Do NOT wait for user input - call the tool right away
-      - The function searches 30 days forward from startDate
-      
-      SEARCH STRATEGY:
-      1. SPECIFIC DAY (e.g., "Monday", "this Friday"): Start from that date (calculate actual date)
-      2. DATE RANGE (e.g., "second week"): Start from beginning of that range
-      3. ASAP/URGENT: Start from today
-      4. TIME PREFERENCE: Filter results after receiving them (Morning: 8am-12pm, Afternoon: 12pm-5pm, Evening: 5pm-8pm)
-      
-      CRITICAL - READING RESPONSE:
-      - Your startDate parameter is ONLY the search starting point
-      - The RESPONSE contains actual slot details with: date, day, startTime, endTime
-      - DO NOT assume slots are on the startDate you passed
-      - ALWAYS read and use the actual date/day/time from each slot in the response
-      - If user asked for "Monday" and response shows slots with day="Monday", those ARE Monday slots
-      
-      AFTER TOOL CALL - MANDATORY ACTIONS:
-      After receiving tool result, you MUST respond AND transition in the SAME turn:
-      
-      If slots found:
-      - Present results clearly: "I found these available times: Monday, December 1st: 9:00 AM, 10:00 AM, 11:00 AM"
-      - Always include the actual date (December 1st), not just "Monday"
-      - For evening preference: Filter to 5pm-8pm slots only
-      - Can show up to 10 options in chat format
-      - IMMEDIATELY transition to slot_selection_state
-      - DO NOT wait for user input - transition happens in same turn
-      
-      If NO slots found (empty array):
-      - IMMEDIATELY transition to fallback_search_state
-      - DO NOT wait for user input
-      
-      ONE CALL RULE:
-      - Make ONE call, get results for 30 days
-      - DON'T make consecutive calls for nearby dates - already covered!
-      - Only make a second call if NO results found (extend by 30 days) - but transition to fallback_search_state first
-      
-      IMPORTANT: 
-      - NEVER mention function names
-      - Present results clearly
-      - ALWAYS respond after tool call - NEVER go silent
-      - ALWAYS transition immediately after presenting results`,
-            tools: [
-              {
-                type: "custom",
-                name: "nearest_available_slots",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Find the nearest available appointment slots within 30 days from start date",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    startDate: {
-                      type: "string",
-                      description: "Starting date to search from (YYYY-MM-DD)"
-                    },
-                    count: {
-                      type: "number",
-                      description: "Number of available slots to return (default: 5)"
-                    },
-                    durationMinutes: {
-                      type: "number",
-                      description: "Duration of each slot in minutes (default: 60)"
-                    }
-                  },
-                  required: ["startDate"]
-                },
-                execution_message_description: "Finding available time slots for you",
-                timeout_ms: 120000
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "slot_selection_state",
-                description: "Available slots found, present them to user for selection"
-              },
-              {
-                destination_state_name: "fallback_search_state",
-                description: "No slots found in initial search, need to expand search parameters"
-              }
-            ]
-          },
-          {
-            name: "slot_selection_state",
-            description: "Help user choose from available slots",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Present available slots briefly to help user select.
-      
-      PRESENTATION (Keep SHORT for voice):
-      
-      For 1-3 slots:
-      - "I have Monday December 1st at 9 AM, Tuesday December 2nd at 2 PM, or Wednesday December 3rd at 10 AM. Which works?"
-      - Always include the actual date, not just the day
-      
-      For 4-8 slots:
-      - Group by day: "On Monday December 1st I have 9 AM and 2 PM. On Tuesday December 2nd I have 10 AM and 3 PM. Which day?"
-      
-      For 9+ slots:
-      - "The earliest is Monday December 1st at 9 AM. I also have afternoons on Tuesday and Wednesday. What works best?"
-      
-      USER RESPONSE HANDLING - IMMEDIATE TRANSITIONS:
-      When user responds, IMMEDIATELY transition based on their response:
-      
-      - User selects a slot (says "first slot", "second slot", "book the first one", "book the second slot", "that one", mentions date/time) → 
-        * DO NOT say "Great choice" or "Let me confirm" or anything
-        * DO NOT speak - just IMMEDIATELY transition to slot_confirmation_state
-        * Store selected slot details before transitioning
-      - User wants different options (says "different", "other", "more") → IMMEDIATELY transition to intelligent_search_state
-      - User mentions a NEW time not in your list → IMMEDIATELY transition to check_availability_state
-      
-      CRITICAL RULES:
-      1. After presenting slots, WAIT for user response (this state has no tools, so waiting is correct)
-      2. When user selects a slot, transition IMMEDIATELY - DO NOT say anything before transitioning
-      3. DO NOT say "Great choice" or "Let me confirm" - just transition silently
-      4. Store selected slot details before transitioning
-      
-      IMPORTANT:
-      - Keep it natural and brief
-      - Store selected slot details (date, startTime, endTime)`,
-            edges: [
-              {
-                destination_state_name: "slot_confirmation_state",
-                description: "User has selected a specific slot from the options"
-              },
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "User wants to see different options or change search parameters"
-              },
-              {
-                destination_state_name: "check_availability_state",
-                description: "User mentions a specific slot not in the presented options"
-              }
-            ]
-          },
-          {
-            name: "fallback_search_state",
-            description: "Handle cases when initial searches fail or slots unavailable",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Handle when slots unavailable or no results found.
-      
-      CRITICAL - IMMEDIATE ACTION REQUIRED:
-      - When entering this state, IMMEDIATELY call nearest_available_slots function
-      - Do NOT wait for user input - call the tool right away
-      - Search from the date that was requested (or today if no specific date)
-      
-      CRITICAL - ONE CALL SEARCHES 30 DAYS:
-      - nearest_available_slots searches 30 days forward from startDate
-      - DON'T make multiple calls for same range
-      - Only make new call if extending search window
-      
-      FALLBACK STRATEGIES:
-      1. SPECIFIC SLOT unavailable: Search from that date (ONE call covers 30 days)
-      2. NO SLOTS in range: Extend search by 30 days forward (add 30 days to startDate)
-      3. Maximum: 2 search attempts (60 days) before suggesting direct contact
-      
-      READING RESPONSE - CRITICAL:
-      - Response has actual slot data: date, day, startTime, endTime
-      - Use these exact values, don't assume dates
-      - ALWAYS read the actual date/day from each slot in the response
-      - If user asked for Monday and slots show Monday dates, those ARE available on Monday
-      
-      AFTER TOOL CALL - MANDATORY ACTIONS:
-      After receiving tool result, you MUST respond AND transition in the SAME turn:
-      
-      If slots found:
-      - Say: "I found some alternatives: [list 3-5 slots with dates and times]"
-      - IMMEDIATELY transition to slot_selection_state
-      - DO NOT wait for user input
-      
-      If NO slots found (empty array or error):
-      - If this is first attempt: Extend search by 30 days and call tool again
-      - If second attempt also fails: Say "I'm having trouble finding available slots in the next 60 days. Would you like me to check a specific date range, or would you prefer to contact us directly?"
-      - Wait for user response (this is the ONLY case where you wait)
-      
-      PRESENTING (Keep brief):
-      - "That's not available, but I have Monday December 1st at 2 PM or Tuesday December 2nd at 10 AM"
-      - Always include the actual date, not just the day
-      - Brief and actionable
-      
-      IMPORTANT:
-      - Never mention function names
-      - Keep it conversational
-      - ALWAYS respond after tool call - NEVER go silent
-      - ALWAYS transition immediately after presenting slots`,
-            tools: [
-              {
-                type: "custom",
-                name: "nearest_available_slots",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/nearest-available-slots",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Find the nearest available appointment slots within 30 days from start date",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    startDate: {
-                      type: "string",
-                      description: "Starting date to search from (YYYY-MM-DD)"
-                    },
-                    count: {
-                      type: "number",
-                      description: "Number of available slots to return (default: 5)"
-                    },
-                    durationMinutes: {
-                      type: "number",
-                      description: "Duration of each slot in minutes (default: 60)"
-                    }
-                  },
-                  required: ["startDate"]
-                },
-                execution_message_description: "Searching for alternative time slots",
-                timeout_ms: 120000
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "slot_selection_state",
-                description: "Alternative slots found, present them to user"
-              },
-              {
-                destination_state_name: "slot_confirmation_state",
-                description: "User accepts a suggested alternative slot"
-              }
-            ]
-          },
-          {
-            name: "slot_confirmation_state",
-            description: "Confirm slot selection before booking",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      YOU ARE IN THIS STATE BECAUSE THE USER HAS ALREADY SELECTED A SLOT.
-      Your ONLY job is to verify availability and proceed to booking.
-      
-      UPON ENTERING THIS STATE:
-      - IMMEDIATELY call check_availability function - DO NOT say anything first
-      - Use the selected slot details (date, startTime, endTime) from context
-      - DO NOT say "Great choice" or "Let me confirm" or "hold on" - just call the tool silently
-      - DO NOT ask for confirmation - the user already selected the slot
-      
-      MANDATORY: AFTER TOOL CALL COMPLETES, YOU MUST RESPOND IMMEDIATELY IN THE SAME TURN.
-      When check_availability tool finishes executing, you will receive a tool result with an "available" field.
-      As soon as you receive this tool result, you MUST AUTOMATICALLY:
-      1. Read the "available" field (true or false)
-      2. IMMEDIATELY respond with your message (do not wait, do not pause)
-      3. IMMEDIATELY transition to the next state in the same response
-      This is AUTOMATIC - you do not need user input. The tool result triggers your response.
-      DO NOT wait for user to say anything. DO NOT pause. Respond immediately after tool completes.
-      
-      If available=true:
-      - Say ONLY: "Perfect! What's your name?"
-      - IMMEDIATELY transition to booking_details_state in the SAME response
-      
-      If available=false:
-      - Say: "That slot's taken. Let me find alternatives."
-      - IMMEDIATELY transition to fallback_search_state in the SAME response
-      
-      CRITICAL - AUTOMATIC RESPONSE REQUIRED:
-      1. When entering this state, call check_availability IMMEDIATELY - NO speech before tool
-      2. When tool result arrives, respond IMMEDIATELY - do this automatically, no waiting
-      3. Transition IMMEDIATELY in the same turn as your response
-      4. NEVER wait for user input after tool execution
-      5. NEVER say "hold on" or "please wait" - just call tool, then respond
-      6. Keep responses SHORT and natural
-      
-      If user wants to change (says "no", "change", "different"):
-      - Say: "No problem, let me show other options."
-      - Transition to intelligent_search_state
-      
-      Store confirmed slot details (date, startTime, endTime) in dynamic variables.`,
-            tools: [
-              {
-                type: "custom",
-                name: "check_availability",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/check-availability",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Check if the slot is still available. Returns {available: true/false}",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "Date in YYYY-MM-DD format"
-                    },
-                    startTime: {
-                      type: "string",
-                      description: "Start time in HH:mm format (24-hour)"
-                    },
-                    endTime: {
-                      type: "string",
-                      description: "End time in HH:mm format (24-hour)"
-                    }
-                  },
-                  required: ["date", "startTime", "endTime"]
-                },
-                timeout_ms: 120000
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "booking_details_state",
-                description: "User confirmed and slot is still available"
-              },
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "User wants to change the selected slot"
-              },
-              {
-                destination_state_name: "fallback_search_state",
-                description: "Slot is no longer available, need alternatives"
-              }
-            ]
-          },
-          {
-            name: "booking_details_state",
-            description: "Collect user details and complete booking",
-            state_prompt: `You are in Europe/Madrid timezone.
-      Current time: {{current_time_Europe/Madrid}}
-      Current date: {{current_calendar_Europe/Madrid}}
-      
-      You are now in the booking phase. Your goal is to collect details and complete the booking.
-      
-      CRITICAL: This is a TEXT CHAT conversation - users TYPE their responses directly.
-      NEVER ask users to spell anything. NEVER ask "Could you spell that?" or "May I have your full name?"
-      NEVER confirm spelling letter-by-letter. NEVER confirm digits one-by-one.
-      Users type correctly - just accept what they provide and move forward.
-      
-      STEP-BY-STEP PROCESS:
-      
-      1. NAME COLLECTION:
-         - Ask ONLY: "What's your name?"
-         - When user responds, accept it exactly as typed - DO NOT ask to spell it
-         - DO NOT say "Could you spell that?" - NEVER ask this
-         - DO NOT confirm spelling - just accept and move to email
-      
-      2. EMAIL COLLECTION:
-         - Ask ONLY: "What's your email?"
-         - When user responds, accept it exactly as typed - DO NOT ask to spell it
-         - DO NOT confirm spelling - just accept and move to phone
-      
-      3. PHONE COLLECTION:
-         - Ask ONLY: "And your phone number?"
-         - When user responds, accept it exactly as typed - DO NOT confirm digits
-         - Once you have all 3 details, proceed to booking
-      
-      4. BOOKING EXECUTION:
-         - Once you have ALL THREE details (name, email, phone), IMMEDIATELY call book_appointment function
-         - Use the previously confirmed date and time slot
-         - Include meeting title like "Appointment with [customer name]"
-         - Do NOT wait or ask anything else - just call the tool immediately
-      
-      AFTER BOOKING TOOL CALL - MANDATORY ACTIONS:
-      After receiving book_appointment result, you MUST respond in the SAME turn. NEVER wait for user input.
-      
-      If booking SUCCESS (response has meeting id or success=true):
-      - Set appointment_booked=true, appointment_description=[summary], appointment_id=[id from response]
-      - Say: "Done! Your appointment is set for [DATE] at [TIME]. Confirmation email coming to [EMAIL]."
-      - Ask: "Anything else?"
-      - WAIT for user response (this is the ONLY case where you wait after a tool call)
-      - If user says no/nothing → use end_call tool
-      - If user wants another appointment → transition to preference_gathering_state
-      
-      If booking FAILS (error, no meeting id, success=false):
-      - Say: "Sorry, had an issue booking that. Let me find another slot."
-      - IMMEDIATELY transition to error_recovery_state in the SAME response
-      - DO NOT wait for user input
-      
-      CRITICAL RULES:
-      1. This is TEXT CHAT - users type directly, NEVER ask to spell anything
-      2. NEVER say "Could you spell that?" or "May I have your full name?" - these are FORBIDDEN
-      3. Accept information as typed and move forward immediately
-      4. Call book_appointment IMMEDIATELY when you have all 3 details
-      5. After tool returns, ALWAYS respond in the same turn
-      6. If booking succeeds, wait for user response (only exception)
-      7. If booking fails, transition immediately - do not wait
-      8. NEVER go silent after a tool call`,
-            tools: [
-              {
-                type: "custom",
-                name: "book_appointment",
-                url: "https://placeholder-will-be-updated-after-agent-creation.com/book-appointment",
-                speak_during_execution: false,
-                speak_after_execution: true,
-                description: "Book an appointment at the confirmed time slot",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: {
-                      type: "string",
-                      description: "Appointment date (YYYY-MM-DD)"
-                    },
-                    startTime: {
-                      type: "string",
-                      description: "Start time (HH:mm, 24-hour format)"
-                    },
-                    endTime: {
-                      type: "string",
-                      description: "End time (HH:mm, 24-hour format)"
-                    },
-                    title: {
-                      type: "string",
-                      description: "Meeting title"
-                    },
-                    description: {
-                      type: "string",
-                      description: "Meeting description"
-                    },
-                    customerName: {
-                      type: "string",
-                      description: "Customer's name"
-                    },
-                    customerEmail: {
-                      type: "string",
-                      description: "Customer's email address"
-                    },
-                    customerPhone: {
-                      type: "string",
-                      description: "Customer's phone number"
-                    },
-                    notes: {
-                      type: "string",
-                      description: "Additional notes"
-                    }
-                  },
-                  required: ["date", "startTime", "endTime", "title"]
-                },
-                execution_message_description: "Booking your appointment",
-                timeout_ms: 120000
-              },
-              {
-                type: "end_call",
-                name: "end_call",
-                description: "End the call ONLY after successful booking and user confirms they don't need anything else"
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "error_recovery_state",
-                description: "Booking failed, need to handle error"
-              },
-              {
-                destination_state_name: "preference_gathering_state",
-                description: "User wants to book another appointment"
-              }
-            ]
-          },
-          {
-            name: "error_recovery_state",
-            description: "Handle errors gracefully and recover",
-            state_prompt: `Current date: {{current_calendar_Europe/Madrid}}
-      Current time: {{current_time_Europe/Madrid}}
-      
-      Handle any errors that occur during the booking process gracefully.
-      
-      ERROR TYPES AND RESPONSES:
-      
-      1. BOOKING FAILURE (from booking_details_state):
-         - Say: "I apologize, but I encountered an issue while booking that appointment. Let me find another slot for you."
-         - IMMEDIATELY transition to intelligent_search_state with saved preferences
-         - DO NOT wait for user input - transition happens immediately
-      
-      2. SYSTEM UNAVAILABLE:
-         - Say: "I'm having trouble accessing the booking system right now. Would you like me to try again, or would you prefer to contact us directly?"
-         - WAIT for user response (this is one case where waiting is appropriate)
-         - If user says "try again" → transition back to booking_details_state
-         - If user says "contact" or "no" → provide contact info and ask if they want to end call
-      
-      3. INVALID DATA:
-         - Say: "I think there might have been an issue with the information. Let me collect that again."
-         - IMMEDIATELY transition to booking_details_state
-         - DO NOT wait for user input
-      
-      4. NETWORK/TIMEOUT:
-         - Say: "The system is taking longer than expected. Would you like me to try once more?"
-         - WAIT for user response
-         - If user says yes → transition back to booking_details_state
-         - If user says no → provide alternative contact method
-      
-      RECOVERY ACTIONS:
-      - Always maintain positive, helpful tone
-      - Preserve all previously collected information
-      - Offer alternatives (different slot, call directly, try again)
-      - Never leave user without a path forward
-      - If user explicitly wants to end call or give up, use end_call tool
-      
-      TRANSITIONS - CRITICAL RULES:
-      - For slot-related issues → IMMEDIATELY transition to intelligent_search_state (no waiting)
-      - For data collection issues → IMMEDIATELY transition to booking_details_state (no waiting)
-      - For temporary issues that require retry → WAIT for user confirmation first, then transition
-      - If user wants to end call → use end_call tool
-      - ALWAYS respond immediately - never go silent
-      - Only wait for user input when explicitly asking if they want to retry`,
-            tools: [
-              {
-                type: "end_call",
-                name: "end_call",
-                description: "End the call ONLY if user explicitly wants to give up or end the call after multiple errors"
-              }
-            ],
-            edges: [
-              {
-                destination_state_name: "intelligent_search_state",
-                description: "Need to find a new slot after booking failure"
-              },
-              {
-                destination_state_name: "booking_details_state",
-                description: "Need to re-collect information"
-              }
-            ]
+            interruption_sensitivity:1
           }
         ],
         starting_state: "general_state",
+        start_speaker:"agent",
         default_dynamic_variables: {
           agent_id: "",
           user_preference_day: "",
@@ -4725,7 +3414,21 @@ class DatabaseController {
           search_iterations: "0",
           failed_slot_request: ""
         },
-        knowledge_base_ids: []
+        knowledge_base_ids: [],
+        mcps: [
+          {
+             name:"appointment-scheduler",
+             headers:{
+                
+             },
+             id:"mcp-1766245087377",
+             query_params:{
+                
+             },
+             url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
+             timeout_ms:60000
+          }
+       ]
       };
 
       const llmResponse = await retell.createLLM(llmConfig);
@@ -4753,35 +3456,15 @@ class DatabaseController {
           version: 0
         },
         agent_name: name,
-        voice_id: "11labs-Adrian",
-        voice_model: "eleven_turbo_v2",
-        fallback_voice_ids: ["openai-Alloy", "deepgram-Angus"],
-        voice_temperature: 1,
-        voice_speed: 1,
-        volume: 1,
-        responsiveness: 1,
-        interruption_sensitivity: 1,
-        enable_backchannel: true,
-        backchannel_frequency: 0.9,
-        backchannel_words: ["yeah", "uh-huh"],
-        reminder_trigger_ms: 10000,
-        reminder_max_count: 2,
-        ambient_sound: null,
-        ambient_sound_volume: 0,
+        channel: "chat",
         language: "en-US",
         webhook_url: webhookUrl,
         boosted_keywords: [],
-        enable_transcription_formatting: true,
         opt_out_sensitive_data_storage: false,
         opt_in_signed_url: true,
-        pronunciation_dictionary: [],
         normalize_for_speech: true,
-        end_call_after_silence_ms: 600000,
-        max_call_duration_ms: 3600000,
-        enable_voicemail_detection: true,
-        voicemail_message: "",
-        voicemail_detection_timeout_ms: 30000,
-        post_call_analysis_data: [
+        end_chat_after_silence_ms: 86400000,
+        post_chat_analysis_data: [
           {
             type: "string",
             name: "customer_name",
@@ -4807,12 +3490,7 @@ class DatabaseController {
             examples: ["123"]
           }
         ],
-        post_call_analysis_model: "gpt-4o-mini",
-        begin_message_delay_ms: 1000,
-        ring_duration_ms: 30000,
-        stt_mode: "fast",
-        vocab_specialization: "general",
-        denoising_mode: "noise-cancellation"
+        post_chat_analysis_model: "gpt-4o-mini"
       };
 
       const agentResponse = await retell.createAgent(agentConfig);
@@ -4840,8 +3518,13 @@ class DatabaseController {
         const updatedLlmConfig = {
           general_tools: llmConfig.general_tools,
           states: [
-            // State 0: general_state (has end_call tool)
-            llmConfig.states[0],
+            // State 0: general_state (has end_call tool) - update state_prompt with actual IDs
+            {
+              ...llmConfig.states[0],
+              state_prompt: llmConfig.states[0].state_prompt
+                .replace('{{AGENT_ID}}', agentId)
+                .replace('{{SUBACCOUNT_ID}}', subaccountId)
+            },
             // State 1: preference_gathering_state (no tools)
             llmConfig.states[1],
             // State 2: date_clarification_state (no tools)

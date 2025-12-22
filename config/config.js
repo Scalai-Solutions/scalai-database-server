@@ -33,7 +33,8 @@ const config = {
   // Retell configuration
   retell: {
     webhookUrl: process.env.RETELL_WEBHOOK_URL,
-    deployedWebhookServerUrl: process.env.DEPLOYED_WEBHOOK_SERVER_URL
+    deployedWebhookServerUrl: process.env.DEPLOYED_WEBHOOK_SERVER_URL,
+    schedulerMcpUrl: process.env.SCHEDULER_MCP_URL
   },
 
   // Webhook Server configuration
