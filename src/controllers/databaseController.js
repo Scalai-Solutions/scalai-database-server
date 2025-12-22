@@ -85,7 +85,7 @@ class DatabaseController {
             response_variables:{
                 
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -97,7 +97,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -109,7 +109,7 @@ class DatabaseController {
             response_variables:{
                 
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -121,7 +121,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -133,7 +133,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            "mcp_id":"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -145,7 +145,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:true
           }
@@ -192,11 +192,10 @@ class DatabaseController {
              headers:{
                 
              },
-             id:"mcp-1766245087377",
              query_params:{
                 
              },
-             url: `${config.retell.schedulerMcpUrl}/mcp` || "https://858a25ed3987.ngrok-free.app/mcp",
+             url: config.retell.schedulerMcpUrl || "https://858a25ed3987.ngrok-free.app/mcp",
              timeout_ms:60000
           }
        ]
@@ -206,7 +205,7 @@ class DatabaseController {
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
 
-      // Get the actual MCP ID from the response
+      // Get the actual MCP ID from the response (Retell generates this)
       const actualMcpId = llmResponse.mcps && llmResponse.mcps.length > 0 ? llmResponse.mcps[0].id : null;
 
       Logger.info('LLM created successfully', {
@@ -3282,7 +3281,7 @@ class DatabaseController {
             response_variables:{
                 
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -3294,7 +3293,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -3306,7 +3305,7 @@ class DatabaseController {
             response_variables:{
                 
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -3318,7 +3317,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -3330,7 +3329,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            "mcp_id":"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:false
           },
@@ -3342,7 +3341,7 @@ class DatabaseController {
             response_variables:{
                
             },
-            mcp_id:"mcp-1766245087377",
+            mcp_id:"PLACEHOLDER_WILL_BE_UPDATED",
             type:"mcp",
             speak_during_execution:true
           }
@@ -3389,7 +3388,6 @@ class DatabaseController {
              headers:{
                 
              },
-             id:"mcp-1766245087377",
              query_params:{
                 
              },
@@ -3402,7 +3400,7 @@ class DatabaseController {
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
 
-      // Get the actual MCP ID from the response
+      // Get the actual MCP ID from the response (Retell generates this)
       const actualMcpId = llmResponse.mcps && llmResponse.mcps.length > 0 ? llmResponse.mcps[0].id : null;
 
       Logger.info('LLM created successfully for chat agent', {
