@@ -60,8 +60,11 @@ class DatabaseController {
       // Get deployed webhook URL from config
       const deployedWebhookUrl = config.retell.deployedWebhookServerUrl || config.webhookServer.deployedUrl || 'https://scalai-b-48660c785242.herokuapp.com';
 
-      // Step 1: Create LLM with only end_call tool (no MCP tools yet - we need MCP ID first)
-      Logger.info('Creating LLM for agent', { operationId, subaccountId, name });
+      // Generate unique MCP ID (required by Retell API)
+      const mcpId = `mcp-${Date.now()}`;
+
+      // Step 1: Create LLM with MCP config and MCP tools
+      Logger.info('Creating LLM for agent', { operationId, subaccountId, name, mcpId });
       
       const llmConfig = {
         version: 0,
@@ -76,6 +79,66 @@ class DatabaseController {
             type: "end_call",
             name: "end_call",
             description: "End the call when user has to leave (like says bye) or you are instructed to do so."
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "check_availability",
+            description: "Check available time slots for a specific date. Returns available slots and already booked slots.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "get_all_availability",
+            description: "Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "create_appointment",
+            description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "update_appointment",
+            description: "Update an existing appointment/meeting. Can update any field.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "delete_appointment",
+            description: "Permanently delete an appointment by its ID.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "Checking on it",
+            speak_after_execution: true,
+            name: "get_call_insights",
+            description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: true
           }
         ],
         states: [
@@ -112,6 +175,7 @@ class DatabaseController {
         knowledge_base_ids: [],
         mcps: [
           {
+            id: mcpId,
             name: "appointment-scheduler",
             headers: {},
             query_params: {},
@@ -125,98 +189,12 @@ class DatabaseController {
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
 
-      // Get the actual MCP ID from the response (Retell generates this)
-      const actualMcpId = llmResponse.mcps && llmResponse.mcps.length > 0 ? llmResponse.mcps[0].id : null;
-
       Logger.info('LLM created successfully', {
         operationId,
         subaccountId,
         llmId,
-        actualMcpId
+        mcpId
       });
-
-      // Step 1.5: Update LLM to add MCP tools with the correct mcp_id
-      if (actualMcpId) {
-        const mcpTools = [
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "check_availability",
-            description: "Check available time slots for a specific date. Returns available slots and already booked slots.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "get_all_availability",
-            description: "Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "create_appointment",
-            description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "update_appointment",
-            description: "Update an existing appointment/meeting. Can update any field.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "delete_appointment",
-            description: "Permanently delete an appointment by its ID.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "Checking on it",
-            speak_after_execution: true,
-            name: "get_call_insights",
-            description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: true
-          }
-        ];
-
-        const updatedGeneralTools = [
-          ...llmConfig.general_tools,
-          ...mcpTools
-        ];
-
-        await retell.updateLLM(llmId, {
-          general_tools: updatedGeneralTools
-        });
-
-        Logger.info('LLM updated with MCP tools', {
-          operationId,
-          subaccountId,
-          llmId,
-          actualMcpId,
-          mcpToolsCount: mcpTools.length
-        });
-      }
 
       // Step 2: Create Agent with the LLM ID (without webhook_url initially)
       Logger.info('Creating agent with LLM', { operationId, subaccountId, name, llmId });
@@ -3240,8 +3218,11 @@ class DatabaseController {
       // Get deployed webhook URL from config
       const deployedWebhookUrl = config.retell.deployedWebhookServerUrl || config.webhookServer.deployedUrl || 'https://scalai-b-48660c785242.herokuapp.com';
 
-      // Step 1: Create LLM with only end_call tool (no MCP tools yet - we need MCP ID first)
-      Logger.info('Creating LLM for chat agent', { operationId, subaccountId, name });
+      // Generate unique MCP ID (required by Retell API)
+      const mcpId = `mcp-${Date.now()}`;
+
+      // Step 1: Create LLM with MCP config and MCP tools
+      Logger.info('Creating LLM for chat agent', { operationId, subaccountId, name, mcpId });
       
       const llmConfig = {
         version: 0,
@@ -3252,10 +3233,70 @@ class DatabaseController {
         begin_message: "",
         general_prompt: "",
         general_tools: [
-              {
-                type: "end_call",
-                name: "end_call",
+          {
+            type: "end_call",
+            name: "end_call",
             description: "End the call when user has to leave (like says bye) or you are instructed to do so."
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "check_availability",
+            description: "Check available time slots for a specific date. Returns available slots and already booked slots.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "get_all_availability",
+            description: "Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "create_appointment",
+            description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "update_appointment",
+            description: "Update an existing appointment/meeting. Can update any field.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "",
+            speak_after_execution: true,
+            name: "delete_appointment",
+            description: "Permanently delete an appointment by its ID.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: false
+          },
+          {
+            execution_message_description: "Checking on it",
+            speak_after_execution: true,
+            name: "get_call_insights",
+            description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
+            response_variables: {},
+            mcp_id: mcpId,
+            type: "mcp",
+            speak_during_execution: true
           }
         ],
         states: [
@@ -3292,6 +3333,7 @@ class DatabaseController {
         knowledge_base_ids: [],
         mcps: [
           {
+            id: mcpId,
             name: "appointment-scheduler",
             headers: {},
             query_params: {},
@@ -3304,98 +3346,12 @@ class DatabaseController {
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
 
-      // Get the actual MCP ID from the response (Retell generates this)
-      const actualMcpId = llmResponse.mcps && llmResponse.mcps.length > 0 ? llmResponse.mcps[0].id : null;
-
       Logger.info('LLM created successfully for chat agent', {
         operationId,
         subaccountId,
         llmId,
-        actualMcpId
+        mcpId
       });
-
-      // Step 1.5: Update LLM to add MCP tools with the correct mcp_id
-      if (actualMcpId) {
-        const mcpTools = [
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "check_availability",
-            description: "Check available time slots for a specific date. Returns available slots and already booked slots.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "get_all_availability",
-            description: "Get all availability schedules. Can filter by type (specific_date, recurring_day, override) and active status.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "create_appointment",
-            description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "update_appointment",
-            description: "Update an existing appointment/meeting. Can update any field.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "",
-            speak_after_execution: true,
-            name: "delete_appointment",
-            description: "Permanently delete an appointment by its ID.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: false
-          },
-          {
-            execution_message_description: "Checking on it",
-            speak_after_execution: true,
-            name: "get_call_insights",
-            description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
-            response_variables: {},
-            mcp_id: actualMcpId,
-            type: "mcp",
-            speak_during_execution: true
-          }
-        ];
-
-        const updatedGeneralTools = [
-          ...llmConfig.general_tools,
-          ...mcpTools
-        ];
-
-        await retell.updateLLM(llmId, {
-          general_tools: updatedGeneralTools
-        });
-
-        Logger.info('Chat agent LLM updated with MCP tools', {
-          operationId,
-          subaccountId,
-          llmId,
-          actualMcpId,
-          mcpToolsCount: mcpTools.length
-        });
-      }
 
       // Step 2: Create Agent with the LLM ID
       Logger.info('Creating chat agent with LLM', { operationId, subaccountId, name, llmId });
