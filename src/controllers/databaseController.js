@@ -306,74 +306,21 @@ class DatabaseController {
           webhookUrl: webhookUrlWithAgent
         });
 
-        // Update LLM with tool URLs that include subaccountId and agentId
+        // Update LLM with state_prompt containing actual IDs
         const updatedLlmConfig = {
           general_tools: llmConfig.general_tools,
           states: [
-            // State 0: general_state (has end_call tool) - update state_prompt with actual IDs
+            // State 0: general_state - update state_prompt with actual IDs
             {
               ...llmConfig.states[0],
               state_prompt: llmConfig.states[0].state_prompt
                 .replace('{{AGENT_ID}}', agentId)
                 .replace('{{SUBACCOUNT_ID}}', subaccountId)
-            },
-            // State 1: preference_gathering_state (no tools)
-            llmConfig.states[1],
-            // State 2: date_clarification_state (no tools)
-            llmConfig.states[2],
-            // State 3: check_availability_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[3],
-              tools: llmConfig.states[3].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/check-availability` }
-                  : tool
-              )
-            },
-            // State 4: intelligent_search_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[4],
-              tools: llmConfig.states[4].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/nearest-available-slots` }
-                  : tool
-              )
-            },
-            // State 5: slot_selection_state (no tools)
-            llmConfig.states[5],
-            // State 6: fallback_search_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[6],
-              tools: llmConfig.states[6].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/nearest-available-slots` }
-                  : tool
-              )
-            },
-            // State 7: slot_confirmation_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[7],
-              tools: llmConfig.states[7].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/check-availability` }
-                  : tool
-              )
-            },
-            // State 8: booking_details_state (has custom tools - update URLs, and end_call)
-            {
-              ...llmConfig.states[8],
-              tools: llmConfig.states[8].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/book-appointment` }
-                  : tool
-              )
-            },
-            // State 9: error_recovery_state (has end_call tool)
-            llmConfig.states[9]
+            }
           ]
         };
 
-        // Update LLM with new tool URLs
+        // Update LLM with new config
         await retell.updateLLM(llmId, updatedLlmConfig);
 
         // Update agent with webhook URL
@@ -3514,74 +3461,21 @@ class DatabaseController {
           webhookUrl: webhookUrlWithAgent
         });
 
-        // Update LLM with tool URLs that include subaccountId and agentId
+        // Update LLM with state_prompt containing actual IDs
         const updatedLlmConfig = {
           general_tools: llmConfig.general_tools,
           states: [
-            // State 0: general_state (has end_call tool) - update state_prompt with actual IDs
+            // State 0: general_state - update state_prompt with actual IDs
             {
               ...llmConfig.states[0],
               state_prompt: llmConfig.states[0].state_prompt
                 .replace('{{AGENT_ID}}', agentId)
                 .replace('{{SUBACCOUNT_ID}}', subaccountId)
-            },
-            // State 1: preference_gathering_state (no tools)
-            llmConfig.states[1],
-            // State 2: date_clarification_state (no tools)
-            llmConfig.states[2],
-            // State 3: check_availability_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[3],
-              tools: llmConfig.states[3].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/check-availability` }
-                  : tool
-              )
-            },
-            // State 4: intelligent_search_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[4],
-              tools: llmConfig.states[4].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/nearest-available-slots` }
-                  : tool
-              )
-            },
-            // State 5: slot_selection_state (no tools)
-            llmConfig.states[5],
-            // State 6: fallback_search_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[6],
-              tools: llmConfig.states[6].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/nearest-available-slots` }
-                  : tool
-              )
-            },
-            // State 7: slot_confirmation_state (has custom tools - update URLs)
-            {
-              ...llmConfig.states[7],
-              tools: llmConfig.states[7].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/check-availability` }
-                  : tool
-              )
-            },
-            // State 8: booking_details_state (has custom tools - update URLs, and end_call)
-            {
-              ...llmConfig.states[8],
-              tools: llmConfig.states[8].tools.map(tool => 
-                tool.type === "custom" 
-                  ? { ...tool, url: `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/book-appointment` }
-                  : tool
-              )
-            },
-            // State 9: error_recovery_state (has end_call tool)
-            llmConfig.states[9]
+            }
           ]
         };
 
-        // Update LLM with new tool URLs
+        // Update LLM with new config
         await retell.updateLLM(llmId, updatedLlmConfig);
 
         // Update agent with webhook URL
