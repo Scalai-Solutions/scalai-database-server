@@ -206,11 +206,33 @@ class DatabaseController {
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
 
+      // Get the actual MCP ID from the response
+      const actualMcpId = llmResponse.mcps && llmResponse.mcps.length > 0 ? llmResponse.mcps[0].id : null;
+
       Logger.info('LLM created successfully', {
         operationId,
         subaccountId,
-        llmId
+        llmId,
+        actualMcpId
       });
+
+      // Step 1.5: Update LLM with correct mcp_id in tools (now that we have the actual MCP ID)
+      if (actualMcpId) {
+        const updatedGeneralTools = llmConfig.general_tools.map(tool => 
+          tool.type === "mcp" ? { ...tool, mcp_id: actualMcpId } : tool
+        );
+
+        await retell.updateLLM(llmId, {
+          general_tools: updatedGeneralTools
+        });
+
+        Logger.info('LLM updated with correct mcp_id in tools', {
+          operationId,
+          subaccountId,
+          llmId,
+          actualMcpId
+        });
+      }
 
       // Step 2: Create Agent with the LLM ID (without webhook_url initially)
       Logger.info('Creating agent with LLM', { operationId, subaccountId, name, llmId });
@@ -295,11 +317,11 @@ class DatabaseController {
         agentName: agentResponse.agent_name
       });
 
-      // Step 2.5: Update agent with webhook URL (now that we have agentId) and tool URLs
+      // Step 2.5: Update agent with webhook URL (now that we have agentId) and state_prompt with IDs
       if (deployedWebhookUrl) {
         const webhookUrlWithAgent = `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/retell`;
         
-        Logger.info('Updating agent with webhook URL and tool URLs', {
+        Logger.info('Updating agent with webhook URL and state_prompt IDs', {
           operationId,
           subaccountId,
           agentId,
@@ -308,7 +330,6 @@ class DatabaseController {
 
         // Update LLM with state_prompt containing actual IDs
         const updatedLlmConfig = {
-          general_tools: llmConfig.general_tools,
           states: [
             // State 0: general_state - update state_prompt with actual IDs
             {
@@ -328,7 +349,7 @@ class DatabaseController {
           webhook_url: webhookUrlWithAgent
         });
 
-        Logger.info('Agent and LLM updated with webhook URL and tool URLs', {
+        Logger.info('Agent and LLM updated with webhook URL and state_prompt IDs', {
           operationId,
           subaccountId,
           agentId,
@@ -3381,11 +3402,33 @@ class DatabaseController {
       const llmResponse = await retell.createLLM(llmConfig);
       llmId = llmResponse.llm_id;
 
+      // Get the actual MCP ID from the response
+      const actualMcpId = llmResponse.mcps && llmResponse.mcps.length > 0 ? llmResponse.mcps[0].id : null;
+
       Logger.info('LLM created successfully for chat agent', {
         operationId,
         subaccountId,
-        llmId
+        llmId,
+        actualMcpId
       });
+
+      // Step 1.5: Update LLM with correct mcp_id in tools (now that we have the actual MCP ID)
+      if (actualMcpId) {
+        const updatedGeneralTools = llmConfig.general_tools.map(tool => 
+          tool.type === "mcp" ? { ...tool, mcp_id: actualMcpId } : tool
+        );
+
+        await retell.updateLLM(llmId, {
+          general_tools: updatedGeneralTools
+        });
+
+        Logger.info('Chat agent LLM updated with correct mcp_id in tools', {
+          operationId,
+          subaccountId,
+          llmId,
+          actualMcpId
+        });
+      }
 
       // Step 2: Create Agent with the LLM ID
       Logger.info('Creating chat agent with LLM', { operationId, subaccountId, name, llmId });
@@ -3450,11 +3493,11 @@ class DatabaseController {
         agentName: agentResponse.agent_name
       });
 
-      // Step 2.5: Update agent with webhook URL (now that we have agentId) and tool URLs
+      // Step 2.5: Update agent with webhook URL (now that we have agentId) and state_prompt with IDs
       if (deployedWebhookUrl) {
         const webhookUrlWithAgent = `${deployedWebhookUrl}/api/webhooks/${subaccountId}/${agentId}/retell`;
         
-        Logger.info('Updating chat agent with webhook URL and tool URLs', {
+        Logger.info('Updating chat agent with webhook URL and state_prompt IDs', {
           operationId,
           subaccountId,
           agentId,
@@ -3463,7 +3506,6 @@ class DatabaseController {
 
         // Update LLM with state_prompt containing actual IDs
         const updatedLlmConfig = {
-          general_tools: llmConfig.general_tools,
           states: [
             // State 0: general_state - update state_prompt with actual IDs
             {
@@ -3483,7 +3525,7 @@ class DatabaseController {
           webhook_url: webhookUrlWithAgent
         });
 
-        Logger.info('Chat agent and LLM updated with webhook URL and tool URLs', {
+        Logger.info('Chat agent and LLM updated with webhook URL and state_prompt IDs', {
           operationId,
           subaccountId,
           agentId,
