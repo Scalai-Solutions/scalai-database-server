@@ -468,9 +468,12 @@ class CallController {
       if (agent_id) {
         callConfig.agent_id = agent_id;
       }
-      if (dynamicVars) {
-        callConfig.retell_llm_dynamic_variables = dynamicVars;
-      }
+
+      // Always include phone_number (to_number) in dynamic variables
+      callConfig.retell_llm_dynamic_variables = {
+        phone_number: to_number,
+        ...(dynamicVars || {})
+      };
 
       const phoneCallResponse = await retell.createPhoneCall(callConfig);
 
@@ -1136,10 +1139,19 @@ class CallController {
         });
       }
 
+      // Enhance tasks with phone_number dynamic variable for each call
+      const enhancedTasks = tasks.map(task => ({
+        ...task,
+        retell_llm_dynamic_variables: {
+          phone_number: task.to_number,
+          ...(task.retell_llm_dynamic_variables || task.dynamic_variables || {})
+        }
+      }));
+
       // Create batch call with Retell
       const batchCallConfig = {
         from_number,
-        tasks
+        tasks: enhancedTasks
       };
 
       if (name) {
