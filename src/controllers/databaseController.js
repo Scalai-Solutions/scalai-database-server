@@ -3459,8 +3459,8 @@ class DatabaseController {
         // Update LLM with new config
         await retell.updateLLM(llmId, updatedLlmConfig);
 
-        // Update agent with webhook URL
-        await retell.updateAgent(agentId, {
+        // Update chat agent with webhook URL (using chat agent specific endpoint)
+        await retell.updateChatAgent(agentId, {
           webhook_url: webhookUrlWithAgent
         });
 
@@ -3589,7 +3589,7 @@ class DatabaseController {
           });
           
           try {
-            await retell.deleteAgent(agentId);
+            await retell.deleteChatAgent(agentId);
             Logger.info('Chat agent deleted successfully during rollback', {
               operationId,
               agentId

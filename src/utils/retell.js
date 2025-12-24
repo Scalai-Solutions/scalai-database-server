@@ -280,7 +280,57 @@ class Retell {
   }
 
   /**
+   * Update a chat agent by ID
+   * Uses direct HTTP PATCH to /update-chat-agent/{agent_id}
+   * @param {string} agentId - The chat agent ID to update
+   * @param {Object} updates - The updates to apply
+   * @returns {Promise<Object>} The updated chat agent
+   */
+  async updateChatAgent(agentId, updates) {
+    try {
+      Logger.info('Updating chat agent', {
+        agentId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      const response = await fetch(`https://api.retellai.com/update-chat-agent/${agentId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`${response.status} ${errorText}`);
+      }
+
+      const updatedAgent = await response.json();
+      
+      Logger.info('Chat agent updated successfully', {
+        agentId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId
+      });
+
+      return updatedAgent;
+    } catch (error) {
+      Logger.error('Failed to update chat agent', {
+        agentId,
+        accountName: this.accountName,
+        subaccountId: this.subaccountId,
+        error: error.message
+      });
+      throw new Error(`Failed to update chat agent: ${error.message}`);
+    }
+  }
+
+  /**
    * Delete a chat agent by ID
+   * Uses direct HTTP DELETE to /delete-chat-agent/{agent_id}
    * @param {string} agentId - The chat agent ID to delete
    * @returns {Promise<void>}
    */
@@ -292,7 +342,17 @@ class Retell {
         subaccountId: this.subaccountId
       });
 
-      await this.client.agent.delete(agentId);
+      const response = await fetch(`https://api.retellai.com/delete-chat-agent/${agentId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`${response.status} ${errorText}`);
+      }
       
       Logger.info('Chat agent deleted successfully', {
         agentId,
