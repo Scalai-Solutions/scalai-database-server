@@ -131,7 +131,7 @@ class DatabaseController {
             speak_during_execution: false
           },
           {
-            execution_message_description: "Checking on it",
+            execution_message_description: "",
             speak_after_execution: true,
             name: "get_call_insights",
             description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
@@ -154,8 +154,7 @@ class DatabaseController {
         states: [
           {
             name: "general_state",
-            state_prompt: "Your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes.  You are a helpful AI assistant for handling customer inquiries and requests. Communicate naturally and conversationally, as a friendly professional would. Focus on understanding what the customer needs and providing clear, helpful responses. Use simple language and avoid technical jargon unless the customer specifically asks technical questions. Go through all mcp tools you have to get appropriate responses.",
-            edges: [],
+            state_prompt: "Your agent_id is \"{{AGENT_ID}}\" and subaccount_id is \"{{SUBACCOUNT_ID}}\".\n\nUse {{phone_number}} as the phone number for the user called. Do not accept any other number as the phone number.\n\nBefore speaking, always call the get_call_insights MCP tool to retrieve past conversations. Do not mention that you are checking the history or accessing past conversations.\n\nUse MCP tools (get_call_insights, get_call_history, get_current_time) to review interactions from the last 90 days. Personalize the discussion based on relevant prior conversations when possible, especially for your opening remarks.\n\nAlways confirm that agent_id and subaccount_id match those shown in double quotes above. You are a helpful AI assistant for handling customer inquiries and requests. Communicate naturally and conversationally, as a friendly professional would. Focus on understanding what the customer needs and providing clear, helpful responses. Use simple language and avoid technical jargon unless specifically requested by the customer. Refer to all appropriate MCP tools to provide thorough assistance.",
             tools: [],
             interruption_sensitivity: 1
           }
@@ -3300,7 +3299,7 @@ class DatabaseController {
             speak_during_execution: false
           },
           {
-            execution_message_description: "Checking on it",
+            execution_message_description: "",
             speak_after_execution: true,
             name: "get_call_insights",
             description: "Get AI-generated insights from call transcripts for a specific phone number. Uses conversation history to answer questions.",
@@ -3323,7 +3322,7 @@ class DatabaseController {
         states: [
           {
             name: "general_state",
-            state_prompt: "Your agent_id is \"{{AGENT_ID}}\" and  subaccount_id is \"{{SUBACCOUNT_ID}}\"\n\nAlways confirm agent_id and subaccount_id to be same as in double quotes.  You are a helpful AI assistant for handling customer inquiries and requests. Communicate naturally and conversationally, as a friendly professional would. Focus on understanding what the customer needs and providing clear, helpful responses. Use simple language and avoid technical jargon unless the customer specifically asks technical questions. Go through all mcp tools you have to get appropriate responses.",
+            state_prompt: "Your agent_id is \"{{AGENT_ID}}\" and subaccount_id is \"{{SUBACCOUNT_ID}}\".\n\nUse {{phone_number}} as the phone number for the user called. Do not accept any other number as the phone number.\n\nBefore speaking, always call the get_call_insights MCP tool to retrieve past conversations. Do not mention that you are checking the history or accessing past conversations.\n\nUse MCP tools (get_call_insights, get_call_history, get_current_time) to review interactions from the last 90 days. Personalize the discussion based on relevant prior conversations when possible, especially for your opening remarks.\n\nAlways confirm that agent_id and subaccount_id match those shown in double quotes above. You are a helpful AI assistant for handling customer inquiries and requests. Communicate naturally and conversationally, as a friendly professional would. Focus on understanding what the customer needs and providing clear, helpful responses. Use simple language and avoid technical jargon unless specifically requested by the customer. Refer to all appropriate MCP tools to provide thorough assistance.",
             edges: [],
             tools: [],
             interruption_sensitivity: 1
