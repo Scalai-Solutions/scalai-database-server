@@ -3381,12 +3381,17 @@ class DatabaseController {
         throw new Error('Webhook URL not configured. Please set RETELL_WEBHOOK_URL in environment variables.');
       }
 
-      // Use chatAgent.create() API for direct chat agent creation
+      // Create chat agent with required configuration
+      // channel: "chat" is required to create a chat agent (vs voice agent which needs voice_id)
       const chatAgentConfig = {
         response_engine: {
           type: "retell-llm",
           llm_id: llmId
-        }
+        },
+        agent_name: name,
+        channel: "chat",
+        language: "en-US",
+        webhook_url: webhookUrl
       };
 
       const agentResponse = await retell.createChatAgent(chatAgentConfig);
