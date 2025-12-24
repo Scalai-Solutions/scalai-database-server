@@ -337,6 +337,33 @@ class KnowledgeBaseController {
         });
       }
 
+      // Validate TEXT type resources - text and title are required
+      if (type === RESOURCE_TYPES.TEXT) {
+        if (!text || typeof text !== 'string' || text.trim().length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Text content is required for TEXT type resources',
+            code: 'VALIDATION_ERROR'
+          });
+        }
+        if (!title || typeof title !== 'string' || title.trim().length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Title is required for TEXT type resources',
+            code: 'VALIDATION_ERROR'
+          });
+        }
+      }
+
+      // Validate URL type resources
+      if (type === RESOURCE_TYPES.URL && (!url || typeof url !== 'string' || url.trim().length === 0)) {
+        return res.status(400).json({
+          success: false,
+          message: 'URL is required for URL type resources',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
       // Fetch retell account data
       const retellAccountData = await retellService.getRetellAccount(subaccountId);
       if (!retellAccountData.isActive) {
