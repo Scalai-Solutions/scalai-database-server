@@ -195,7 +195,7 @@ class Retell {
 
   /**
    * Create a new chat agent with the provided configuration
-   * Uses agent.create() with response_engine containing the LLM ID
+   * Uses direct HTTP POST to /create-chat-agent endpoint (not available in SDK)
    * @param {Object} chatAgentConfig - Chat agent configuration object
    * @param {Object} chatAgentConfig.response_engine - Response engine configuration
    * @param {string} chatAgentConfig.response_engine.llm_id - The LLM ID to use
@@ -206,13 +206,28 @@ class Retell {
     try {
       Logger.info('Creating chat agent', {
         llmId: chatAgentConfig.response_engine?.llm_id,
+        agentName: chatAgentConfig.agent_name,
         accountName: this.accountName,
         subaccountId: this.subaccountId
       });
 
-      // Use agent.create() - the SDK doesn't have a separate chatAgent method
-      // The response_engine with llm_id is what makes it a chat agent
-      const chatAgentResponse = await this.client.agent.create(chatAgentConfig);
+      // Use direct HTTP POST to /create-chat-agent endpoint
+      // The SDK doesn't expose this endpoint, so we call it directly
+      const response = await fetch('https://api.retellai.com/create-chat-agent', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(chatAgentConfig)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`${response.status} ${errorText}`);
+      }
+
+      const chatAgentResponse = await response.json();
       
       Logger.info('Chat agent created successfully', {
         agentId: chatAgentResponse.agent_id,
