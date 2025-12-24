@@ -195,7 +195,7 @@ class Retell {
 
   /**
    * Create a new chat agent with the provided configuration
-   * Uses the dedicated chatAgent.create() API endpoint
+   * Uses agent.create() with response_engine containing the LLM ID
    * @param {Object} chatAgentConfig - Chat agent configuration object
    * @param {Object} chatAgentConfig.response_engine - Response engine configuration
    * @param {string} chatAgentConfig.response_engine.llm_id - The LLM ID to use
@@ -210,7 +210,9 @@ class Retell {
         subaccountId: this.subaccountId
       });
 
-      const chatAgentResponse = await this.client.chatAgent.create(chatAgentConfig);
+      // Use agent.create() - the SDK doesn't have a separate chatAgent method
+      // The response_engine with llm_id is what makes it a chat agent
+      const chatAgentResponse = await this.client.agent.create(chatAgentConfig);
       
       Logger.info('Chat agent created successfully', {
         agentId: chatAgentResponse.agent_id,
