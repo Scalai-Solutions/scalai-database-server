@@ -469,9 +469,11 @@ class CallController {
         callConfig.agent_id = agent_id;
       }
 
-      // Always include phone_number (to_number) in dynamic variables
+      // Always include phone_number, agent_id, and subaccount_id in dynamic variables
       callConfig.retell_llm_dynamic_variables = {
         phone_number: to_number,
+        agent_id: agent_id || '',
+        subaccount_id: subaccountId,
         ...(dynamicVars || {})
       };
 
@@ -1139,11 +1141,13 @@ class CallController {
         });
       }
 
-      // Enhance tasks with phone_number dynamic variable for each call
+      // Enhance tasks with phone_number, agent_id, and subaccount_id dynamic variables for each call
       const enhancedTasks = tasks.map(task => ({
         ...task,
         retell_llm_dynamic_variables: {
           phone_number: task.to_number,
+          agent_id: task.agent_id || '',
+          subaccount_id: subaccountId,
           ...(task.retell_llm_dynamic_variables || task.dynamic_variables || {})
         }
       }));

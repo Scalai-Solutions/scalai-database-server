@@ -1010,7 +1010,7 @@ class Retell {
    * @param {number} pollInterval - Poll interval in ms (default: 2000 = 2 seconds)
    * @returns {Promise<Object>} The completed knowledge base details
    */
-  async waitForKnowledgeBaseReady(knowledgeBaseId, maxWaitTime = 60000, pollInterval = 2000) {
+  async waitForKnowledgeBaseReady(knowledgeBaseId, maxWaitTime = 20000, pollInterval = 2000) {
     const startTime = Date.now();
     
     Logger.info('Waiting for knowledge base to be ready', {
