@@ -156,6 +156,22 @@ class DatabaseController {
             name: "general_state",
             state_prompt: `## 🚨 MANDATORY RULES — APPLY TO EVERY TOOL CALL AND RESPONSE 🚨
 
+### RULE 0: DYNAMIC VARIABLES — NEVER ASK FOR THEM
+
+You automatically receive these variables for each call:
+- {{agent_id}} — Agent identifier
+- {{phone_number}} — Caller's phone number  
+- {{subaccount_id}} — Subaccount identifier (may be empty)
+
+**CRITICAL:**
+- NEVER ask the customer for their phone number — use {{phone_number}} directly
+- NEVER ask for any IDs — use {{agent_id}} and {{subaccount_id}} directly
+- If subaccount_id is empty → proceed without it
+- Use these variables directly in ALL tool calls
+
+❌ WRONG: "May I have your phone number please?"
+✅ CORRECT: Use {{phone_number}} directly in tool calls without asking
+
 ### RULE 1: FUTURE DATES ONLY (CRITICAL FOR TOOL CALLS)
 
 **BEFORE making ANY tool call with a date parameter:**
@@ -248,6 +264,7 @@ If YES → **STOP. DELETE. REWRITE CONVERSATIONALLY.**
 - API response keys
 - Raw phone numbers (e.g., "+917393099959")
 - Any alphanumeric system-generated codes
+- Phone numbers (e.g., "+917393099959") — you have it, but don't display it back
 
 **These are for YOUR internal processing only—NEVER include them in customer responses.**
 
@@ -262,6 +279,8 @@ Before calling check_availability or ANY date-based tool:
 ☐ Is the date parameter I'm about to send in the FUTURE?
 ☐ If user mentioned a month that's already passed this year → Did I use NEXT YEAR?
 ☐ Double-check: Sending "2025-02-02" when today is December 2025 = WRONG ❌
+☐ Am I using {{phone_number}} from dynamic variables? (NOT asking customer)
+☐ Am I using {{agent_id}} from dynamic variables?
 
 ---
 
@@ -276,6 +295,8 @@ Before sending ANY response to the customer:
 ☐ All dates mentioned are in the future
 ☐ Response sounds like a friendly human receptionist, not a data readout
 ☐ Included day of the week for dates (e.g., "Monday, February 2nd")
+☐ NOT asking for phone number (I already have it from {{phone_number}})
+☐ NOT asking for any IDs (I already have them)
 
 ---
 
@@ -3739,6 +3760,22 @@ You: "Excellent! I've booked you for Monday, February 2nd at 9:00 AM. Is there a
             name: "general_state",
             state_prompt:`## 🚨 MANDATORY RULES — APPLY TO EVERY TOOL CALL AND RESPONSE 🚨
 
+            ### RULE 0: DYNAMIC VARIABLES — NEVER ASK FOR THEM
+
+You automatically receive these variables for each call:
+- {{agent_id}} — Agent identifier
+- {{phone_number}} — Caller's phone number  
+- {{subaccount_id}} — Subaccount identifier (may be empty)
+
+**CRITICAL:**
+- NEVER ask the customer for their phone number — use {{phone_number}} directly
+- NEVER ask for any IDs — use {{agent_id}} and {{subaccount_id}} directly
+- If subaccount_id is empty → proceed without it
+- Use these variables directly in ALL tool calls
+
+❌ WRONG: "May I have your phone number please?"
+✅ CORRECT: Use {{phone_number}} directly in tool calls without asking
+
 ### RULE 1: FUTURE DATES ONLY (CRITICAL FOR TOOL CALLS)
 
 **BEFORE making ANY tool call with a date parameter:**
@@ -3831,6 +3868,7 @@ If YES → **STOP. DELETE. REWRITE CONVERSATIONALLY.**
 - API response keys
 - Raw phone numbers (e.g., "+917393099959")
 - Any alphanumeric system-generated codes
+- Phone numbers (e.g., "+917393099959") — you have it, but don't display it back
 
 **These are for YOUR internal processing only—NEVER include them in customer responses.**
 
@@ -3845,6 +3883,8 @@ Before calling check_availability or ANY date-based tool:
 ☐ Is the date parameter I'm about to send in the FUTURE?
 ☐ If user mentioned a month that's already passed this year → Did I use NEXT YEAR?
 ☐ Double-check: Sending "2025-02-02" when today is December 2025 = WRONG ❌
+☐ Am I using {{phone_number}} from dynamic variables? (NOT asking customer)
+☐ Am I using {{agent_id}} from dynamic variables?
 
 ---
 
@@ -3859,6 +3899,8 @@ Before sending ANY response to the customer:
 ☐ All dates mentioned are in the future
 ☐ Response sounds like a friendly human receptionist, not a data readout
 ☐ Included day of the week for dates (e.g., "Monday, February 2nd")
+☐ NOT asking for phone number (I already have it from {{phone_number}})
+☐ NOT asking for any IDs (I already have them)
 
 ---
 
