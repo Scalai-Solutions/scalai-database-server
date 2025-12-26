@@ -78,15 +78,39 @@ class ChatController {
 
       // Create chat with Retell, passing dynamic variables and other options
       const chatOptions = {};
-      if (retell_llm_dynamic_variables && typeof retell_llm_dynamic_variables === 'object') {
-        chatOptions.retell_llm_dynamic_variables = retell_llm_dynamic_variables;
+      
+      // Always include standard dynamic variables (phone_number, agent_id, subaccount_id)
+      // Merge with any custom dynamic variables from the request
+      const standardDynamicVariables = {
+        agent_id: agentId,
+        subaccount_id: subaccountId
+      };
+      
+      // If phone_number is provided in retell_llm_dynamic_variables, use it
+      // Otherwise, it will be empty string
+      if (retell_llm_dynamic_variables?.phone_number) {
+        standardDynamicVariables.phone_number = retell_llm_dynamic_variables.phone_number;
+      } else {
+        standardDynamicVariables.phone_number = '';
       }
+      
+      // Merge custom dynamic variables with standard ones
+      chatOptions.retell_llm_dynamic_variables = {
+        ...standardDynamicVariables,
+        ...(retell_llm_dynamic_variables || {})
+      };
+      
       if (metadata && typeof metadata === 'object') {
         chatOptions.metadata = metadata;
       }
       if (agent_version && typeof agent_version === 'number') {
         chatOptions.agent_version = agent_version;
       }
+
+      Logger.info('Creating chat with dynamic variables', {
+        operationId,
+        dynamicVariables: chatOptions.retell_llm_dynamic_variables
+      });
 
       const chatResponse = await retell.createChat(agentId, chatOptions);
 

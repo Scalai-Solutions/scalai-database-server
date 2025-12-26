@@ -453,7 +453,30 @@ class InstagramService {
       const retellAccountData = await retellService.getRetellAccount(subaccountId);
       const retell = new Retell(retellAccountData.apiKey, retellAccountData);
       
-      const chatResponse = await retell.createChat(agentId);
+      // Prepare dynamic variables with standard variables
+      // Instagram doesn't have phone numbers, so phone_number will be empty
+      const retell_llm_dynamic_variables = {
+        phone_number: '',
+        agent_id: agentId,
+        subaccount_id: subaccountId,
+        instagram_user_id: instagramUserId,
+        channel: 'instagram'
+      };
+      
+      Logger.info('Creating Instagram chat with dynamic variables', {
+        subaccountId,
+        agentId,
+        instagramUserId,
+        dynamicVariables: retell_llm_dynamic_variables
+      });
+      
+      const chatResponse = await retell.createChat(agentId, {
+        retell_llm_dynamic_variables,
+        metadata: {
+          instagram_user_id: instagramUserId,
+          channel: 'instagram'
+        }
+      });
       
       // Store chat with Instagram metadata
       const newChatDocument = {
@@ -469,7 +492,7 @@ class InstagramService {
           instagram_user_id: instagramUserId,
           channel: 'instagram'
         },
-        retell_llm_dynamic_variables: {},
+        retell_llm_dynamic_variables: chatResponse.retell_llm_dynamic_variables || {},
         collected_dynamic_variables: {},
         subaccountId,
         createdBy: 'instagram-service',

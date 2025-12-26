@@ -1236,8 +1236,12 @@ class WhatsAppService {
       const retell = new Retell(retellAccountData.apiKey, retellAccountData);
       
       // Prepare dynamic variables with WhatsApp contact information
+      // Always include standard dynamic variables: phone_number, agent_id, subaccount_id
       const retell_llm_dynamic_variables = {
-        customer_phone: phoneNumber,
+        phone_number: phoneNumber,
+        agent_id: agentId,
+        subaccount_id: subaccountId,
+        customer_phone: phoneNumber,  // Keep for backward compatibility
         channel: 'whatsapp'
       };
       
@@ -1250,6 +1254,13 @@ class WhatsAppService {
       if (contactInfo.email) {
         retell_llm_dynamic_variables.customer_email = contactInfo.email;
       }
+      
+      Logger.info('Creating WhatsApp chat with dynamic variables', {
+        subaccountId,
+        agentId,
+        phoneNumber,
+        dynamicVariables: retell_llm_dynamic_variables
+      });
       
       const chatResponse = await retell.createChat(agentId, {
         retell_llm_dynamic_variables,
