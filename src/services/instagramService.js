@@ -478,6 +478,12 @@ class InstagramService {
         }
       });
       
+      // Add chat_id to dynamic variables
+      const dynamicVarsWithChatId = {
+        ...(chatResponse.retell_llm_dynamic_variables || retell_llm_dynamic_variables || {}),
+        chat_id: chatResponse.chat_id
+      };
+      
       // Store chat with Instagram metadata
       const newChatDocument = {
         chat_id: chatResponse.chat_id,
@@ -492,7 +498,7 @@ class InstagramService {
           instagram_user_id: instagramUserId,
           channel: 'instagram'
         },
-        retell_llm_dynamic_variables: chatResponse.retell_llm_dynamic_variables || {},
+        retell_llm_dynamic_variables: dynamicVarsWithChatId,
         collected_dynamic_variables: {},
         subaccountId,
         createdBy: 'instagram-service',

@@ -1273,6 +1273,12 @@ class WhatsAppService {
         }
       });
       
+      // Add chat_id to dynamic variables
+      const dynamicVarsWithChatId = {
+        ...(chatResponse.retell_llm_dynamic_variables || retell_llm_dynamic_variables || {}),
+        chat_id: chatResponse.chat_id
+      };
+      
       // Store chat with WhatsApp metadata
       const newChatDocument = {
         chat_id: chatResponse.chat_id,
@@ -1289,7 +1295,7 @@ class WhatsAppService {
           ...(contactInfo.name && { contact_name: contactInfo.name }),
           ...(contactInfo.email && { contact_email: contactInfo.email })
         },
-        retell_llm_dynamic_variables: chatResponse.retell_llm_dynamic_variables || {},
+        retell_llm_dynamic_variables: dynamicVarsWithChatId,
         collected_dynamic_variables: {},
         subaccountId,
         createdBy: 'whatsapp-service',

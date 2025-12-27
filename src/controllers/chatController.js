@@ -116,6 +116,13 @@ class ChatController {
 
       // Store chat information in database
       const chatsCollection = connection.db.collection('chats');
+      
+      // Add chat_id to dynamic variables
+      const dynamicVarsWithChatId = {
+        ...(chatResponse.retell_llm_dynamic_variables || chatOptions.retell_llm_dynamic_variables || {}),
+        chat_id: chatResponse.chat_id
+      };
+      
       const chatDocument = {
         chat_id: chatResponse.chat_id,
         agent_id: agentId,
@@ -126,7 +133,7 @@ class ChatController {
         message_count: chatResponse.message_with_tool_calls?.length || 0,
         messages: chatResponse.message_with_tool_calls || [],
         metadata: chatResponse.metadata || {},
-        retell_llm_dynamic_variables: chatResponse.retell_llm_dynamic_variables || {},
+        retell_llm_dynamic_variables: dynamicVarsWithChatId,
         collected_dynamic_variables: chatResponse.collected_dynamic_variables || {},
         chat_cost: chatResponse.chat_cost || null,
         chat_analysis: chatResponse.chat_analysis || null,

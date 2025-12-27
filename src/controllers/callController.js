@@ -483,6 +483,13 @@ class CallController {
       const storage = await getStorageFromRequest(req, subaccountId, userId);
       const callsCollection = await storage.getCollection('calls');
       const now = new Date();
+      
+      // Add call_id to dynamic variables
+      const dynamicVarsWithCallId = {
+        ...(dynamicVars || {}),
+        call_id: phoneCallResponse.call_id
+      };
+      
       const callDocument = {
         call_id: phoneCallResponse.call_id,
         agent_id: phoneCallResponse.agent_id || agent_id,
@@ -492,7 +499,7 @@ class CallController {
         call_status: phoneCallResponse.call_status || 'registered',
         start_timestamp: now.getTime(), // Add timestamp for filtering
         metadata: enhancedMetadata,
-        retell_llm_dynamic_variables: dynamicVars || null,
+        retell_llm_dynamic_variables: dynamicVarsWithCallId,
         subaccountId: subaccountId,
         createdBy: userId,
         createdAt: now,
@@ -1142,6 +1149,7 @@ class CallController {
       }
 
       // Enhance tasks with phone_number, agent_id, and subaccount_id dynamic variables for each call
+      // Note: call_id will be added when individual calls are created (via webhook)
       const enhancedTasks = tasks.map(task => ({
         ...task,
         retell_llm_dynamic_variables: {
