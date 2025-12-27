@@ -1088,13 +1088,14 @@ class WhatsAppService {
       
       const response = await retell.createChatCompletion(chatId, messageContent);
       
-      Logger.debug('Received response from Retell', {
+      Logger.info('Received response from Retell', {
         subaccountId,
         agentId,
         chatId,
         hasMessages: !!(response && response.messages),
         messageCount: response && response.messages ? response.messages.length : 0,
-        responseKeys: response ? Object.keys(response) : []
+        responseKeys: response ? Object.keys(response) : [],
+        response: JSON.stringify(response, null, 2)
       });
       
       // Update chat in database
@@ -1378,9 +1379,10 @@ class WhatsAppService {
       // Get the last message from the agent (not from user)
       const messages = response.messages || [];
       
-      Logger.debug('Extracting agent reply', {
+      Logger.info('Extracting agent reply from response', {
         messageCount: messages.length,
-        messageRoles: messages.map(m => m.role)
+        messageRoles: messages.map(m => m.role),
+        messages: JSON.stringify(messages, null, 2)
       });
       
       if (messages.length === 0) {

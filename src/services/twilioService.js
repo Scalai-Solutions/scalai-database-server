@@ -3232,10 +3232,37 @@ class TwilioService {
         }
       }
 
+      // Get deployed webhook URL for inbound webhook
+      const deployedWebhookUrl = config.webhookServer.deployedUrl || 
+                                  config.retell.deployedWebhookServerUrl;
+
       // Prepare Retell update payload
       const retellPayload = {};
       if (updateData.inbound_agent_id !== undefined) {
         retellPayload.inbound_agent_id = updateData.inbound_agent_id;
+        
+        // Add inbound webhook URL when inbound is enabled
+        if (updateData.inbound_agent_id !== null && deployedWebhookUrl) {
+          retellPayload.inbound_webhook_url = `${deployedWebhookUrl}/api/webhooks/${subaccountId}/retell/${updateData.inbound_agent_id}`;
+          
+          Logger.info('Adding inbound webhook URL', {
+            phoneNumber,
+            inbound_agent_id: updateData.inbound_agent_id,
+            inbound_webhook_url: retellPayload.inbound_webhook_url
+          });
+        } else if (updateData.inbound_agent_id === null) {
+          // Remove webhook URL when inbound is disabled
+          retellPayload.inbound_webhook_url = null;
+          
+          Logger.info('Removing inbound webhook URL (inbound disabled)', {
+            phoneNumber
+          });
+        } else if (!deployedWebhookUrl) {
+          Logger.warn('DEPLOYED_WEBHOOK_SERVER_URL not configured, skipping inbound webhook URL', {
+            phoneNumber,
+            inbound_agent_id: updateData.inbound_agent_id
+          });
+        }
       }
       if (updateData.outbound_agent_id !== undefined) {
         retellPayload.outbound_agent_id = updateData.outbound_agent_id;
@@ -3284,6 +3311,10 @@ class TwilioService {
         } else if (updateData.inbound_agent_id === null) {
           // Explicitly set version to null when agent is removed
           mongoUpdateData.inbound_agent_version = null;
+        }
+        // Store inbound webhook URL from Retell response
+        if (response.data.inbound_webhook_url !== undefined) {
+          mongoUpdateData.inbound_webhook_url = response.data.inbound_webhook_url;
         }
       }
       if (updateData.outbound_agent_id !== undefined) {
