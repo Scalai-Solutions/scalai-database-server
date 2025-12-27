@@ -486,9 +486,19 @@ class CallController {
       
       // Add call_id to dynamic variables
       const dynamicVarsWithCallId = {
-        ...(dynamicVars || {}),
-        call_id: phoneCallResponse.call_id
+        phone_number: to_number,
+        agent_id: agent_id || '',
+        subaccount_id: subaccountId,
+        call_id: phoneCallResponse.call_id,
+        ...(dynamicVars || {})
       };
+      
+      Logger.info('Phone call created with dynamic variables including call_id', {
+        operationId,
+        subaccountId,
+        callId: phoneCallResponse.call_id,
+        dynamicVariables: dynamicVarsWithCallId
+      });
       
       const callDocument = {
         call_id: phoneCallResponse.call_id,

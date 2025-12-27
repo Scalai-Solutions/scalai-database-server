@@ -123,6 +123,13 @@ class ChatController {
         chat_id: chatResponse.chat_id
       };
       
+      Logger.info('Chat created with dynamic variables including chat_id', {
+        operationId,
+        subaccountId,
+        chatId: chatResponse.chat_id,
+        dynamicVariables: dynamicVarsWithChatId
+      });
+      
       const chatDocument = {
         chat_id: chatResponse.chat_id,
         agent_id: agentId,
