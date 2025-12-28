@@ -2235,6 +2235,16 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         previousPeriodMeetings
       };
 
+      // IMPORTANT: Calculate success rate from actual meetings, not from success_rate field
+      // Success rate = (meetingsBooked / totalCalls) * 100
+      // This ensures accuracy since success_rate field may be out of sync with actual meetings
+      const currentSuccessRate = currentStats.totalCalls > 0 
+        ? (meetingsCounts.currentPeriodMeetings / currentStats.totalCalls) * 100 
+        : 0;
+      const previousSuccessRate = previousStats.totalCalls > 0 
+        ? (meetingsCounts.previousPeriodMeetings / previousStats.totalCalls) * 100 
+        : 0;
+
       // Step 4: Calculate percentage changes
       const calculatePercentageChange = (current, previous) => {
         if (previous === 0) {
@@ -2256,7 +2266,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
           totalCalls: currentStats.totalCalls,
           meetingsBooked: meetingsCounts.currentPeriodMeetings,
           unresponsiveCalls: currentStats.unresponsiveCalls,
-          cumulativeSuccessRate: Math.round(currentStats.cumulativeSuccessRate * 100) / 100,
+          cumulativeSuccessRate: Math.round(currentSuccessRate * 100) / 100,
           periodStart: currentPeriodStart,
           periodEnd: currentPeriodEnd
         },
@@ -2264,7 +2274,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
           totalCalls: previousStats.totalCalls,
           meetingsBooked: meetingsCounts.previousPeriodMeetings,
           unresponsiveCalls: previousStats.unresponsiveCalls,
-          cumulativeSuccessRate: Math.round(previousStats.cumulativeSuccessRate * 100) / 100,
+          cumulativeSuccessRate: Math.round(previousSuccessRate * 100) / 100,
           periodStart: previousPeriodStart,
           periodEnd: previousPeriodEnd
         },
@@ -2288,9 +2298,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
             ) / 100
           },
           cumulativeSuccessRate: {
-            change: Math.round((currentStats.cumulativeSuccessRate - previousStats.cumulativeSuccessRate) * 100) / 100,
+            change: Math.round((currentSuccessRate - previousSuccessRate) * 100) / 100,
             percentageChange: Math.round(
-              calculatePercentageChange(currentStats.cumulativeSuccessRate, previousStats.cumulativeSuccessRate) * 100
+              calculatePercentageChange(currentSuccessRate, previousSuccessRate) * 100
             ) / 100
           }
         }
@@ -2674,6 +2684,16 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         previousPeriodMeetings
       };
 
+      // IMPORTANT: Calculate success rate from actual meetings, not from success_rate field
+      // Success rate = (meetingsBooked / totalCalls) * 100
+      // This ensures accuracy since success_rate field may be out of sync with actual meetings
+      const currentSuccessRate = currentStats.totalCalls > 0 
+        ? (meetingsCounts.currentPeriodMeetings / currentStats.totalCalls) * 100 
+        : 0;
+      const previousSuccessRate = previousStats.totalCalls > 0 
+        ? (meetingsCounts.previousPeriodMeetings / previousStats.totalCalls) * 100 
+        : 0;
+
       // Step 4: Calculate percentage changes
       const calculatePercentageChange = (current, previous) => {
         if (previous === 0) {
@@ -2695,7 +2715,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
           totalCalls: currentStats.totalCalls,
           meetingsBooked: meetingsCounts.currentPeriodMeetings,
           unresponsiveCalls: currentStats.unresponsiveCalls,
-          cumulativeSuccessRate: Math.round(currentStats.cumulativeSuccessRate * 100) / 100,
+          cumulativeSuccessRate: Math.round(currentSuccessRate * 100) / 100,
           costPerCall: Math.round(currentStats.avgCostPerCall * 100) / 100,
           avgCallDuration: Math.round(currentStats.avgCallDuration * 100) / 100,
           periodStart: currentPeriodStart,
@@ -2705,7 +2725,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
           totalCalls: previousStats.totalCalls,
           meetingsBooked: meetingsCounts.previousPeriodMeetings,
           unresponsiveCalls: previousStats.unresponsiveCalls,
-          cumulativeSuccessRate: Math.round(previousStats.cumulativeSuccessRate * 100) / 100,
+          cumulativeSuccessRate: Math.round(previousSuccessRate * 100) / 100,
           costPerCall: Math.round(previousStats.avgCostPerCall * 100) / 100,
           avgCallDuration: Math.round(previousStats.avgCallDuration * 100) / 100,
           periodStart: previousPeriodStart,
@@ -2731,9 +2751,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
             ) / 100
           },
           cumulativeSuccessRate: {
-            change: Math.round((currentStats.cumulativeSuccessRate - previousStats.cumulativeSuccessRate) * 100) / 100,
+            change: Math.round((currentSuccessRate - previousSuccessRate) * 100) / 100,
             percentageChange: Math.round(
-              calculatePercentageChange(currentStats.cumulativeSuccessRate, previousStats.cumulativeSuccessRate) * 100
+              calculatePercentageChange(currentSuccessRate, previousSuccessRate) * 100
             ) / 100
           },
           costPerCall: {
