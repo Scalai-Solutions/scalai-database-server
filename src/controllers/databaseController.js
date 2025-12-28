@@ -1866,30 +1866,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
       // For MOCK sessions, skip cache and use hybrid storage
       const isMockSession = req.mockSession?.isMock && req.mockSession?.sessionId;
 
-      // Check cache first (only for non-mock sessions)
-      if (!isMockSession) {
-        const cacheKey = `${subaccountId}:${agentId}:${currentPeriodStart.getTime()}:${currentPeriodEnd.getTime()}`;
-        try {
-          const cachedStats = await redisService.getCachedAgentStats(cacheKey, cacheKey);
-          if (cachedStats) {
-            return res.json({
-              success: true,
-              message: 'Agent details retrieved successfully (cached)',
-              data: cachedStats,
-              meta: {
-                operationId,
-                duration: `${Date.now() - startTime}ms`,
-                cached: true
-              }
-            });
-          }
-        } catch (cacheError) {
-          Logger.warn('Cache retrieval failed, fetching from database', {
-            operationId,
-            error: cacheError.message
-          });
-        }
-      }
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we always fetch fresh data
 
       // Get database connection and collections
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
@@ -2124,53 +2102,61 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
             callIds: { $push: '$call_id' }
           }
         },
-        // Calculate cumulative success rate
-        // NOTE: We now divide by totalCalls (not just calls with scores) to get accurate success rate
-        {
-          $project: {
-            _id: 1,
-            totalCalls: 1,
-            unresponsiveCalls: 1,
-            callIds: 1,
-            // Replace null scores with 0 for proper calculation
-            successScores: {
-              $map: {
-                input: '$successScores',
-                as: 'score',
-                in: { $ifNull: ['$$score', 0] }
+            // Calculate cumulative success rate
+            // Formula: (sum of success_rate values) / totalCalls * 100
+            // NOTE: We divide by totalCalls (not just calls with scores) to get accurate success rate
+            // IMPORTANT: success_rate should be 1 if a meeting exists for the call, 0 otherwise
+            // The success_rate field is set based on call_analysis.appointment_booked, but should
+            // ideally be verified against actual meetings in the database
+            {
+              $project: {
+                _id: 1,
+                totalCalls: 1,
+                unresponsiveCalls: 1,
+                callIds: 1,
+                // Replace null scores with 0 for proper calculation
+                // This ensures all calls are included in the denominator
+                successScores: {
+                  $map: {
+                    input: '$successScores',
+                    as: 'score',
+                    in: { $ifNull: ['$$score', 0] }
+                  }
+                }
               }
-            }
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            totalCalls: 1,
-            unresponsiveCalls: 1,
-            callIds: 1,
-            cumulativeSuccessRate: {
-              $cond: {
-                if: { $gt: ['$totalCalls', 0] },
-                then: {
-                  $multiply: [
-                    {
-                      $divide: [
-                        { $reduce: {
-                          input: '$successScores',
-                          initialValue: 0,
-                          in: { $add: ['$$value', '$$this'] }
-                        }},
-                        '$totalCalls'
+            },
+            {
+              $project: {
+                _id: 1,
+                totalCalls: 1,
+                unresponsiveCalls: 1,
+                callIds: 1,
+                // Calculate: (sum of all success_rate values) / totalCalls * 100
+                // Example: If 3 calls have success_rate=1 out of 7 total calls:
+                // (1+1+1+0+0+0+0) / 7 * 100 = 42.9%
+                cumulativeSuccessRate: {
+                  $cond: {
+                    if: { $gt: ['$totalCalls', 0] },
+                    then: {
+                      $multiply: [
+                        {
+                          $divide: [
+                            { $reduce: {
+                              input: '$successScores',
+                              initialValue: 0,
+                              in: { $add: ['$$value', '$$this'] }
+                            }},
+                            '$totalCalls'
+                          ]
+                        },
+                        100
                       ]
                     },
-                    100
-                  ]
-                },
-                else: 0
+                    else: 0
+                  }
+                }
               }
             }
-          }
-        }
       ]).toArray();
 
       // Parse aggregation results
@@ -2310,15 +2296,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         }
       };
 
-      // Cache the results for 5 minutes
-      try {
-        await redisService.cacheAgentStats(cacheKey, cacheKey, statistics, 300);
-      } catch (cacheError) {
-        Logger.warn('Failed to cache agent statistics', {
-          operationId,
-          error: cacheError.message
-        });
-      }
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we don't cache them
+      // Cache invalidation still happens when meetings are created/deleted to notify other systems
 
       const duration = Date.now() - startTime;
 
@@ -2416,28 +2396,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         previousPeriodEnd: previousPeriodEnd.toISOString()
       });
 
-      // Check cache first (cache key includes date range and cost indicator)
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we always fetch fresh data
       const cacheKey = `${subaccountId}:${agentId}:cost:${currentPeriodStart.getTime()}:${currentPeriodEnd.getTime()}`;
-      try {
-        const cachedStats = await redisService.getCachedAgentStats(cacheKey, cacheKey);
-        if (cachedStats) {
-          return res.json({
-            success: true,
-            message: 'Agent details with cost retrieved successfully (cached)',
-            data: cachedStats,
-            meta: {
-              operationId,
-              duration: `${Date.now() - startTime}ms`,
-              cached: true
-            }
-          });
-        }
-      } catch (cacheError) {
-        Logger.warn('Cache retrieval failed, fetching from database', {
-          operationId,
-          error: cacheError.message
-        });
-      }
 
       // Get database connection
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
@@ -2790,15 +2751,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         }
       };
 
-      // Cache the results for 5 minutes
-      try {
-        await redisService.cacheAgentStats(cacheKey, cacheKey, statistics, 300);
-      } catch (cacheError) {
-        Logger.warn('Failed to cache agent statistics with cost', {
-          operationId,
-          error: cacheError.message
-        });
-      }
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we don't cache them
+      // Cache invalidation still happens when meetings are created/deleted to notify other systems
 
       const duration = Date.now() - startTime;
 
@@ -2891,28 +2846,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         groupBy
       });
 
-      // Check cache first
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we always fetch fresh data
       const cacheKey = `${subaccountId}:${agentId}:analytics:${periodStart.getTime()}:${periodEnd.getTime()}:${groupBy}`;
-      try {
-        const cachedData = await redisService.getCachedAgentStats(cacheKey, cacheKey);
-        if (cachedData) {
-          return res.json({
-            success: true,
-            message: 'Agent call analytics retrieved successfully (cached)',
-            data: cachedData,
-            meta: {
-              operationId,
-              duration: `${Date.now() - startTime}ms`,
-              cached: true
-            }
-          });
-        }
-      } catch (cacheError) {
-        Logger.warn('Cache retrieval failed, fetching from database', {
-          operationId,
-          error: cacheError.message
-        });
-      }
 
       // Get database connection
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
@@ -3213,15 +3149,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         outcomeDistribution
       };
 
-      // Cache the results for 5 minutes
-      try {
-        await redisService.cacheAgentStats(cacheKey, cacheKey, responseData, 300);
-      } catch (cacheError) {
-        Logger.warn('Failed to cache agent call analytics', {
-          operationId,
-          error: cacheError.message
-        });
-      }
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we don't cache them
+      // Cache invalidation still happens when meetings are created/deleted to notify other systems
 
       const duration = Date.now() - startTime;
 
@@ -3313,28 +3243,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         periodEnd: periodEnd.toISOString()
       });
 
-      // Check cache first
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we always fetch fresh data
       const cacheKey = `${subaccountId}:${agentId}:costs-breakdown:${periodStart.getTime()}:${periodEnd.getTime()}`;
-      try {
-        const cachedData = await redisService.getCachedAgentStats(cacheKey, cacheKey);
-        if (cachedData) {
-          return res.json({
-            success: true,
-            message: 'Agent call costs breakdown retrieved successfully (cached)',
-            data: cachedData,
-            meta: {
-              operationId,
-              duration: `${Date.now() - startTime}ms`,
-              cached: true
-            }
-          });
-        }
-      } catch (cacheError) {
-        Logger.warn('Cache retrieval failed, fetching from database', {
-          operationId,
-          error: cacheError.message
-        });
-      }
 
       // Get database connection
       const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
@@ -3568,15 +3479,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         }
       };
 
-      // Cache the results for 5 minutes
-      try {
-        await redisService.cacheAgentStats(cacheKey, cacheKey, responseData, 300);
-      } catch (cacheError) {
-        Logger.warn('Failed to cache agent call costs breakdown', {
-          operationId,
-          error: cacheError.message
-        });
-      }
+      // NOTE: Success rate caching is disabled to ensure real-time accuracy
+      // Success rates change when meetings are created/deleted, so we don't cache them
+      // Cache invalidation still happens when meetings are created/deleted to notify other systems
 
       const duration = Date.now() - startTime;
 

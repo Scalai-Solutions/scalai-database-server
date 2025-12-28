@@ -199,27 +199,57 @@ class CallController {
       const storage = await getStorageFromRequest(req, subaccountId, 'webhook-service');
       const callsCollection = await storage.getCollection('calls');
 
-      // Calculate success_rate if call_analysis is being updated
-      let successRate = null;
+      // Prepare update operation - merge call_analysis instead of replacing it
+      const updateOperation = {
+        $set: {
+          subaccountId: subaccountId,
+          lastUpdatedBy: 'webhook-service',
+          lastUpdatedAt: new Date()
+        },
+        $setOnInsert: {
+          createdAt: new Date(), // Only set on insert, not on update
+          createdBy: 'webhook-service'
+        }
+      };
+
+      // Handle call_analysis merge - preserve existing fields when updating
       if (updateData.call_analysis) {
-        successRate = calculateCallSuccessRate(updateData.call_analysis);
+        // Get existing call to merge call_analysis
+        const existingCall = await callsCollection.findOne({ call_id: callId });
+        const existingCallAnalysis = existingCall?.call_analysis || {};
+        
+        // Merge call_analysis: new fields override, but preserve existing ones
+        const mergedCallAnalysis = {
+          ...existingCallAnalysis,
+          ...updateData.call_analysis,
+          // Merge custom_analysis_data if it exists
+          custom_analysis_data: {
+            ...(existingCallAnalysis.custom_analysis_data || {}),
+            ...(updateData.call_analysis.custom_analysis_data || {})
+          }
+        };
+
+        updateOperation.$set.call_analysis = mergedCallAnalysis;
+
+        // Calculate success_rate from merged call_analysis
+        const successRate = calculateCallSuccessRate(mergedCallAnalysis);
         if (successRate !== null) {
-          updateData.success_rate = successRate;
+          updateOperation.$set.success_rate = successRate;
           Logger.debug('Success rate calculated for call', {
             operationId,
             subaccountId,
             callId,
-            successRate
+            successRate,
+            appointment_booked: mergedCallAnalysis.appointment_booked
           });
         }
       } else {
         // If call_analysis is not being updated, try to calculate from existing document
-        // This handles cases where call_analysis was updated in a previous webhook
         const existingCall = await callsCollection.findOne({ call_id: callId });
         if (existingCall?.call_analysis && !existingCall.success_rate) {
-          successRate = calculateCallSuccessRate(existingCall.call_analysis);
+          const successRate = calculateCallSuccessRate(existingCall.call_analysis);
           if (successRate !== null) {
-            updateData.success_rate = successRate;
+            updateOperation.$set.success_rate = successRate;
             Logger.debug('Success rate calculated from existing call_analysis', {
               operationId,
               subaccountId,
@@ -230,21 +260,14 @@ class CallController {
         }
       }
 
+      // Add all other updateData fields (except call_analysis which we handled above)
+      const { call_analysis, ...otherUpdates } = updateData;
+      Object.assign(updateOperation.$set, otherUpdates);
+
       // Upsert the call document
       const result = await callsCollection.updateOne(
         { call_id: callId },
-        { 
-          $set: {
-            ...updateData,
-            subaccountId: subaccountId,
-            lastUpdatedBy: 'webhook-service',
-            lastUpdatedAt: new Date()
-          },
-          $setOnInsert: {
-            createdAt: new Date(), // Only set on insert, not on update
-            createdBy: 'webhook-service'
-          }
-        },
+        updateOperation,
         { upsert: true }
       );
 
