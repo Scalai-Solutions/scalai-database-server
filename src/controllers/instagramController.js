@@ -68,7 +68,8 @@ class InstagramController {
         },
         resourceId: agentId,
         resourceName: `Instagram - ${agentDocument.name || agentId}`,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -161,7 +162,8 @@ class InstagramController {
         },
         resourceId: agentId,
         resourceName: `Instagram - ${agentId}`,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -227,7 +229,8 @@ class InstagramController {
         },
         resourceId: agentId,
         resourceName: `Instagram - ${agentId}`,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;

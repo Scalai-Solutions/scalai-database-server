@@ -182,7 +182,8 @@ class ChatController {
         },
         resourceId: chatResponse.chat_id,
         resourceName: `Chat - ${agentDocument.name || agentId}`,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -493,7 +494,8 @@ class ChatController {
         },
         resourceId: chatId,
         resourceName: `Chat ${chatId}`,
-        operationId
+        operationId,
+        agentId: chatDocument.agent_id || null
       });
 
       const duration = Date.now() - startTime;
@@ -853,7 +855,8 @@ class ChatController {
         },
         resourceId: chatId,
         resourceName: `Chat ${chatId}`,
-        operationId
+        operationId,
+        agentId: chatDocument.agent_id || null
       });
 
       const duration = Date.now() - startTime;

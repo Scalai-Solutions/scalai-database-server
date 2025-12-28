@@ -1160,7 +1160,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -1678,7 +1679,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
       // Step 9: Delete all activities associated with this agent
       let activitiesDeletedCount = 0;
       try {
-        const activityDeleteResult = await ActivityService.deleteActivitiesByResource(
+        const activityDeleteResult = await ActivityService.deleteActivitiesByAgent(
           subaccountId, 
           agentId, 
           userId
@@ -1726,7 +1727,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -3787,7 +3789,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -5067,7 +5070,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -5383,7 +5387,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -6941,7 +6946,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
       // Step 13: Delete all activities associated with this chat agent
       let activitiesDeletedCount = 0;
       try {
-        const activityDeleteResult = await ActivityService.deleteActivitiesByResource(
+        const activityDeleteResult = await ActivityService.deleteActivitiesByAgent(
           subaccountId, 
           agentId, 
           userId
@@ -6994,7 +6999,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -7553,7 +7559,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -7805,7 +7812,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -7968,7 +7976,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -8157,7 +8166,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -8321,7 +8331,8 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         },
         resourceId: agentId,
         resourceName: agentDocument.name,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;

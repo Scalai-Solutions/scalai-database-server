@@ -190,7 +190,8 @@ class WhatsAppController {
         },
         resourceId: agentId,
         resourceName: `WhatsApp - ${agentId}`,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -260,7 +261,8 @@ class WhatsAppController {
         },
         resourceId: agentId,
         resourceName: `WhatsApp - ${agentId}`,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;

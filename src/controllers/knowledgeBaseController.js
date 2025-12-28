@@ -686,7 +686,8 @@ class KnowledgeBaseController {
           agentId: scope === SCOPE_TYPES.LOCAL ? agentId : null,
           knowledgeBaseId: kb.knowledgeBaseId
         },
-        operationId
+        operationId,
+        agentId: scope === SCOPE_TYPES.LOCAL ? agentId : null
       });
 
       const duration = Date.now() - startTime;
@@ -1221,7 +1222,8 @@ class KnowledgeBaseController {
           wasLastResource: isLastResource,
           kbDeleted: isLastResource
         },
-        operationId
+        operationId,
+        agentId: kb.agentId || null
       });
 
       const duration = Date.now() - startTime;
@@ -1458,7 +1460,8 @@ class KnowledgeBaseController {
           newKBId: targetKB.knowledgeBaseId,
           agentId: scope === SCOPE_TYPES.LOCAL ? agentId : null
         },
-        operationId
+        operationId,
+        agentId: scope === SCOPE_TYPES.LOCAL ? agentId : null
       });
 
       const duration = Date.now() - startTime;

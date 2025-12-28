@@ -110,7 +110,8 @@ class CallController {
         },
         resourceId: webCallResponse.call_id,
         resourceName: `Web Call - ${agentDocument.name || agentId}`,
-        operationId
+        operationId,
+        agentId
       });
 
       const duration = Date.now() - startTime;
@@ -563,7 +564,8 @@ class CallController {
         },
         resourceId: phoneCallResponse.call_id,
         resourceName: `Call to ${to_number}`,
-        operationId
+        operationId,
+        agentId: phoneCallResponse.agent_id || agent_id || null
       });
 
       const duration = Date.now() - startTime;
@@ -1063,11 +1065,13 @@ class CallController {
         metadata: {
           callId,
           retellAccountId: retellAccountData.id,
-          deletedFromDatabase: !!callDocument
+          deletedFromDatabase: !!callDocument,
+          agentId: callDocument?.agent_id || null
         },
         resourceId: callId,
         resourceName: `Call ${callId}`,
-        operationId
+        operationId,
+        agentId: callDocument?.agent_id || null
       });
 
       const duration = Date.now() - startTime;

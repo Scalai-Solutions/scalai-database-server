@@ -113,6 +113,7 @@ class ActivityService {
    * @param {string} params.resourceId - ID of the resource affected (optional)
    * @param {string} params.resourceName - Name of the resource affected (optional)
    * @param {string} params.operationId - Operation ID for tracking (optional)
+   * @param {string} params.agentId - Agent ID associated with this activity (optional)
    */
   static async logActivity({
     subaccountId,
@@ -123,7 +124,8 @@ class ActivityService {
     metadata = {},
     resourceId = null,
     resourceName = null,
-    operationId = null
+    operationId = null,
+    agentId = null
   }) {
     try {
       // Get database connection
@@ -146,6 +148,7 @@ class ActivityService {
         resourceId,
         resourceName,
         operationId,
+        agentId,
         timestamp: new Date(),
         createdAt: new Date()
       };
@@ -359,10 +362,13 @@ class ActivityService {
       
       const activitiesCollection = connection.db.collection('activities');
       
-      // Delete all activities for this resource
+      // Delete all activities for this resource (by resourceId or agentId)
       const deleteResult = await activitiesCollection.deleteMany({
         subaccountId,
-        resourceId
+        $or: [
+          { resourceId },
+          { agentId: resourceId }
+        ]
       });
       
       Logger.info('Activities deleted for resource', {
@@ -381,6 +387,50 @@ class ActivityService {
         stack: error.stack,
         subaccountId,
         resourceId
+      });
+      
+      // Don't throw error - activity deletion should not break the main flow
+      return { success: false, error: error.message, deletedCount: 0 };
+    }
+  }
+
+  /**
+   * Delete all activities for a specific agent
+   * @param {string} subaccountId - Subaccount ID
+   * @param {string} agentId - Agent ID
+   * @param {string} userId - User ID making the request
+   * @returns {Promise<Object>} Deletion result with count
+   */
+  static async deleteActivitiesByAgent(subaccountId, agentId, userId) {
+    try {
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId || 'system');
+      const { connection } = connectionInfo;
+      
+      const activitiesCollection = connection.db.collection('activities');
+      
+      // Delete all activities for this agent (by agentId)
+      const deleteResult = await activitiesCollection.deleteMany({
+        subaccountId,
+        agentId
+      });
+      
+      Logger.info('Activities deleted for agent', {
+        subaccountId,
+        agentId,
+        deletedCount: deleteResult.deletedCount
+      });
+      
+      return {
+        success: true,
+        deletedCount: deleteResult.deletedCount
+      };
+    } catch (error) {
+      Logger.error('Failed to delete activities for agent', {
+        error: error.message,
+        stack: error.stack,
+        subaccountId,
+        agentId
       });
       
       // Don't throw error - activity deletion should not break the main flow

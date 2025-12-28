@@ -230,7 +230,8 @@ class ActivityController {
         description,
         metadata = {},
         resourceId = null,
-        resourceName = null
+        resourceName = null,
+        agentId = null
       } = req.body;
       
       // Validate required fields
@@ -260,7 +261,8 @@ class ActivityController {
         metadata,
         resourceId,
         resourceName,
-        operationId
+        operationId,
+        agentId
       });
       
       if (!result.success) {
