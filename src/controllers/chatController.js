@@ -956,24 +956,34 @@ class ChatController {
         // Extract chat_successful value to preserve it
         const existingChatSuccessful = existingChatAnalysis.chat_successful;
         
+        // Check if this update is from meeting creation/deletion (has special marker)
+        const isFromMeetingCreation = updateData._fromMeetingCreation === true;
+        const isFromMeetingDeletion = updateData._fromMeetingDeletion === true;
+        const isFromMeetingOperation = isFromMeetingCreation || isFromMeetingDeletion;
+        
         // Merge chat_analysis: new fields override, but preserve existing ones
         const mergedChatAnalysis = {
           ...existingChatAnalysis,
           ...updateData.chat_analysis
         };
         
-        // Restore chat_successful value if it existed (it was set from meeting creation/deletion)
-        // Only allow it to be overwritten if explicitly set in updateData (from meeting creation/deletion)
-        if (updateData.chat_analysis.chat_successful !== undefined) {
+        // CRITICAL: Only allow chat_successful to be set/changed if this update is from meeting creation/deletion
+        // If it's from webhook analysis or any other source, preserve the existing value or remove it
+        if (isFromMeetingOperation && updateData.chat_analysis.chat_successful !== undefined) {
           // Explicitly set from meeting creation/deletion - use the new value
           mergedChatAnalysis.chat_successful = updateData.chat_analysis.chat_successful;
         } else if (existingChatSuccessful !== undefined) {
           // Preserve existing value (was set from meeting creation/deletion)
+          // Do NOT allow webhook analysis or other updates to change it
           mergedChatAnalysis.chat_successful = existingChatSuccessful;
         } else {
-          // No existing value and not explicitly set - ensure it's not set
+          // No existing value and not from meeting operation - ensure it's not set
           delete mergedChatAnalysis.chat_successful;
         }
+        
+        // Remove the marker fields from updateData (they're not part of the chat document)
+        delete updateData._fromMeetingCreation;
+        delete updateData._fromMeetingDeletion;
         
         updateOperation.$set.chat_analysis = mergedChatAnalysis;
       }

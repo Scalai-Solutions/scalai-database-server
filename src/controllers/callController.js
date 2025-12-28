@@ -224,6 +224,11 @@ class CallController {
         const existingAppointmentBooked = existingCallAnalysis.appointment_booked;
         const existingCustomAppointmentBooked = existingCallAnalysis.custom_analysis_data?.appointment_booked;
         
+        // Check if this update is from meeting creation/deletion (has special marker)
+        const isFromMeetingCreation = updateData._fromMeetingCreation === true;
+        const isFromMeetingDeletion = updateData._fromMeetingDeletion === true;
+        const isFromMeetingOperation = isFromMeetingCreation || isFromMeetingDeletion;
+        
         // Merge call_analysis: new fields override, but preserve existing ones
         const mergedCallAnalysis = {
           ...existingCallAnalysis,
@@ -235,21 +240,22 @@ class CallController {
           }
         };
         
-        // Restore appointment_booked values if they existed (they were set from meeting creation/deletion)
-        // Only allow them to be overwritten if explicitly set in updateData (from meeting creation/deletion)
-        if (updateData.call_analysis.appointment_booked !== undefined) {
+        // CRITICAL: Only allow appointment_booked to be set/changed if this update is from meeting creation/deletion
+        // If it's from webhook analysis or any other source, preserve the existing value or remove it
+        if (isFromMeetingOperation && updateData.call_analysis.appointment_booked !== undefined) {
           // Explicitly set from meeting creation/deletion - use the new value
           mergedCallAnalysis.appointment_booked = updateData.call_analysis.appointment_booked;
         } else if (existingAppointmentBooked !== undefined) {
           // Preserve existing value (was set from meeting creation/deletion)
+          // Do NOT allow webhook analysis or other updates to change it
           mergedCallAnalysis.appointment_booked = existingAppointmentBooked;
         } else {
-          // No existing value and not explicitly set - ensure it's not set
+          // No existing value and not from meeting operation - ensure it's not set
           delete mergedCallAnalysis.appointment_booked;
         }
         
         // Same for custom_analysis_data.appointment_booked
-        if (updateData.call_analysis.custom_analysis_data?.appointment_booked !== undefined) {
+        if (isFromMeetingOperation && updateData.call_analysis.custom_analysis_data?.appointment_booked !== undefined) {
           // Explicitly set from meeting creation/deletion - use the new value
           if (!mergedCallAnalysis.custom_analysis_data) {
             mergedCallAnalysis.custom_analysis_data = {};
@@ -257,14 +263,19 @@ class CallController {
           mergedCallAnalysis.custom_analysis_data.appointment_booked = updateData.call_analysis.custom_analysis_data.appointment_booked;
         } else if (existingCustomAppointmentBooked !== undefined) {
           // Preserve existing value (was set from meeting creation/deletion)
+          // Do NOT allow webhook analysis or other updates to change it
           if (!mergedCallAnalysis.custom_analysis_data) {
             mergedCallAnalysis.custom_analysis_data = {};
           }
           mergedCallAnalysis.custom_analysis_data.appointment_booked = existingCustomAppointmentBooked;
         } else if (mergedCallAnalysis.custom_analysis_data) {
-          // No existing value and not explicitly set - ensure it's not set
+          // No existing value and not from meeting operation - ensure it's not set
           delete mergedCallAnalysis.custom_analysis_data.appointment_booked;
         }
+        
+        // Remove the marker fields from updateData (they're not part of the call document)
+        delete updateData._fromMeetingCreation;
+        delete updateData._fromMeetingDeletion;
 
         updateOperation.$set.call_analysis = mergedCallAnalysis;
 
