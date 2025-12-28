@@ -218,6 +218,12 @@ class CallController {
         const existingCall = await callsCollection.findOne({ call_id: callId });
         const existingCallAnalysis = existingCall?.call_analysis || {};
         
+        // IMPORTANT: Preserve appointment_booked from existing call_analysis
+        // appointment_booked should ONLY be set when a meeting is actually created/deleted, not from webhook analysis
+        // Extract appointment_booked values to preserve them
+        const existingAppointmentBooked = existingCallAnalysis.appointment_booked;
+        const existingCustomAppointmentBooked = existingCallAnalysis.custom_analysis_data?.appointment_booked;
+        
         // Merge call_analysis: new fields override, but preserve existing ones
         const mergedCallAnalysis = {
           ...existingCallAnalysis,
@@ -228,6 +234,37 @@ class CallController {
             ...(updateData.call_analysis.custom_analysis_data || {})
           }
         };
+        
+        // Restore appointment_booked values if they existed (they were set from meeting creation/deletion)
+        // Only allow them to be overwritten if explicitly set in updateData (from meeting creation/deletion)
+        if (updateData.call_analysis.appointment_booked !== undefined) {
+          // Explicitly set from meeting creation/deletion - use the new value
+          mergedCallAnalysis.appointment_booked = updateData.call_analysis.appointment_booked;
+        } else if (existingAppointmentBooked !== undefined) {
+          // Preserve existing value (was set from meeting creation/deletion)
+          mergedCallAnalysis.appointment_booked = existingAppointmentBooked;
+        } else {
+          // No existing value and not explicitly set - ensure it's not set
+          delete mergedCallAnalysis.appointment_booked;
+        }
+        
+        // Same for custom_analysis_data.appointment_booked
+        if (updateData.call_analysis.custom_analysis_data?.appointment_booked !== undefined) {
+          // Explicitly set from meeting creation/deletion - use the new value
+          if (!mergedCallAnalysis.custom_analysis_data) {
+            mergedCallAnalysis.custom_analysis_data = {};
+          }
+          mergedCallAnalysis.custom_analysis_data.appointment_booked = updateData.call_analysis.custom_analysis_data.appointment_booked;
+        } else if (existingCustomAppointmentBooked !== undefined) {
+          // Preserve existing value (was set from meeting creation/deletion)
+          if (!mergedCallAnalysis.custom_analysis_data) {
+            mergedCallAnalysis.custom_analysis_data = {};
+          }
+          mergedCallAnalysis.custom_analysis_data.appointment_booked = existingCustomAppointmentBooked;
+        } else if (mergedCallAnalysis.custom_analysis_data) {
+          // No existing value and not explicitly set - ensure it's not set
+          delete mergedCallAnalysis.custom_analysis_data.appointment_booked;
+        }
 
         updateOperation.$set.call_analysis = mergedCallAnalysis;
 

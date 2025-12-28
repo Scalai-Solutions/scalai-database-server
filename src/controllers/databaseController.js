@@ -6147,7 +6147,22 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         {
           $group: {
             _id: '$period',
-            totalMeetings: { $sum: 1 }
+            totalMeetings: { $sum: 1 },
+            uniqueChatIds: { 
+              $addToSet: {
+                $cond: {
+                  if: { 
+                    $and: [
+                      { $ne: ['$chat_id', null] },
+                      { $ne: ['$chat_id', ''] },
+                      { $ne: [{ $type: '$chat_id' }, 'missing'] }
+                    ]
+                  },
+                  then: '$chat_id',
+                  else: '$$REMOVE'
+                }
+              }
+            }
           }
         }
       ]).toArray();
@@ -6169,17 +6184,31 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         chatsWithMessages: 0
       };
 
-      const currentMeetingsData = meetingsAggregation.find(m => m._id === 'current') || { totalMeetings: 0 };
-      const previousMeetingsData = meetingsAggregation.find(m => m._id === 'previous') || { totalMeetings: 0 };
+      const currentMeetingsData = meetingsAggregation.find(m => m._id === 'current') || { 
+        totalMeetings: 0,
+        uniqueChatIds: []
+      };
+      const previousMeetingsData = meetingsAggregation.find(m => m._id === 'previous') || { 
+        totalMeetings: 0,
+        uniqueChatIds: []
+      };
+
+      // IMPORTANT: Calculate success rate from unique chats with meetings, not total meetings
+      // Success rate = (unique chats with meetings / total chats) * 100
+      // This ensures accuracy since one chat can have multiple meetings
+      const currentSuccessRate = currentChatsData.totalChats > 0 
+        ? ((currentMeetingsData.uniqueChatIds?.length || 0) / currentChatsData.totalChats) * 100 
+        : 0;
+      const previousSuccessRate = previousChatsData.totalChats > 0 
+        ? ((previousMeetingsData.uniqueChatIds?.length || 0) / previousChatsData.totalChats) * 100 
+        : 0;
 
       // Calculate metrics
       const currentStats = {
         totalChats: currentChatsData.totalChats,
         meetingsBooked: currentMeetingsData.totalMeetings,
         unresponsiveChats: currentChatsData.unresponsiveChats,
-        cumulativeSuccessRate: currentChatsData.totalChats > 0 
-          ? (currentMeetingsData.totalMeetings / currentChatsData.totalChats) * 100 
-          : 0,
+        cumulativeSuccessRate: currentSuccessRate,
         costPerChat: currentChatsData.totalChats > 0 
           ? currentChatsData.totalCost / currentChatsData.totalChats 
           : 0,
@@ -6194,9 +6223,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         totalChats: previousChatsData.totalChats,
         meetingsBooked: previousMeetingsData.totalMeetings,
         unresponsiveChats: previousChatsData.unresponsiveChats,
-        cumulativeSuccessRate: previousChatsData.totalChats > 0 
-          ? (previousMeetingsData.totalMeetings / previousChatsData.totalChats) * 100 
-          : 0,
+        cumulativeSuccessRate: previousSuccessRate,
         costPerChat: previousChatsData.totalChats > 0 
           ? previousChatsData.totalCost / previousChatsData.totalChats 
           : 0,
@@ -6264,9 +6291,9 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
             ) / 100
           },
           cumulativeSuccessRate: {
-            change: Math.round((currentStats.cumulativeSuccessRate - previousStats.cumulativeSuccessRate) * 100) / 100,
+            change: Math.round((currentSuccessRate - previousSuccessRate) * 100) / 100,
             percentageChange: Math.round(
-              calculatePercentageChange(currentStats.cumulativeSuccessRate, previousStats.cumulativeSuccessRate) * 100
+              calculatePercentageChange(currentSuccessRate, previousSuccessRate) * 100
             ) / 100
           },
           costPerChat: {

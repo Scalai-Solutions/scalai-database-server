@@ -266,8 +266,77 @@ class ChatController {
         });
       }
 
+      // Return immediately - process Retell API call asynchronously
+      const duration = Date.now() - startTime;
+      
+      res.json({
+        success: true,
+        message: 'Message queued for processing',
+        data: {
+          chat_id: chatId,
+          status: 'processing'
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
+      });
+
+      // Process Retell API call asynchronously (fire and forget)
+      // This prevents timeouts and improves user experience
+      ChatController.processRetellMessageAsync(
+        retell,
+        chatId,
+        content,
+        subaccountId,
+        userId,
+        chatDocument.agent_id,
+        operationId
+      ).catch(error => {
+        // Log error but don't throw - this is async processing
+        Logger.error('Error processing Retell message asynchronously', {
+          operationId,
+          subaccountId,
+          chatId,
+          error: error.message,
+          stack: error.stack
+        });
+      });
+
+    } catch (error) {
+      const errorInfo = await ChatController.handleError(error, req, operationId, 'sendMessage', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
+    }
+  }
+
+  /**
+   * Process Retell message asynchronously
+   * This method handles the Retell API call in the background to prevent timeouts
+   */
+  static async processRetellMessageAsync(
+    retell,
+    chatId,
+    content,
+    subaccountId,
+    userId,
+    agentId,
+    operationId
+  ) {
+    try {
+      Logger.info('Processing Retell message asynchronously', {
+        operationId,
+        subaccountId,
+        chatId
+      });
+
       // Send message using Retell
       const response = await retell.createChatCompletion(chatId, content);
+
+      // Get database connection
+      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
+      const { connection } = connectionInfo;
+      
+      const chatsCollection = connection.db.collection('chats');
 
       // Update chat in database with new messages
       const updateData = {
@@ -285,7 +354,7 @@ class ChatController {
       // Update cache
       await redisService.invalidateChat(subaccountId, chatId);
       
-      Logger.info('Chat message sent and stored', {
+      Logger.info('Chat message processed and stored asynchronously', {
         operationId,
         subaccountId,
         chatId,
@@ -301,7 +370,7 @@ class ChatController {
       //   description: `Message sent in chat ${chatId}`,
       //   metadata: {
       //     chatId,
-      //     agentId: chatDocument.agent_id,
+      //     agentId: agentId,
       //     messageCount: response.messages?.length || 0
       //   },
       //   resourceId: chatId,
@@ -309,24 +378,15 @@ class ChatController {
       //   operationId
       // });
 
-      const duration = Date.now() - startTime;
-
-      res.json({
-        success: true,
-        message: 'Message sent successfully',
-        data: {
-          chat_id: chatId,
-          messages: response.messages
-        },
-        meta: {
-          operationId,
-          duration: `${duration}ms`
-        }
-      });
-
     } catch (error) {
-      const errorInfo = await ChatController.handleError(error, req, operationId, 'sendMessage', startTime);
-      return res.status(errorInfo.statusCode).json(errorInfo.response);
+      Logger.error('Error in async Retell message processing', {
+        operationId,
+        subaccountId,
+        chatId,
+        error: error.message,
+        stack: error.stack
+      });
+      throw error; // Re-throw to be caught by caller
     }
   }
 
@@ -914,21 +974,63 @@ class ChatController {
       const storage = await getStorageFromRequest(req, subaccountId, 'webhook-service');
       const chatsCollection = await storage.getCollection('chats');
 
+      // Prepare update operation
+      const updateOperation = {
+        $set: {
+          subaccountId: subaccountId,
+          lastUpdatedBy: 'webhook-service',
+          lastUpdatedAt: new Date()
+        },
+        $setOnInsert: {
+          createdAt: new Date(), // Only set on insert, not on update
+          createdBy: 'webhook-service'
+        }
+      };
+
+      // Handle chat_analysis merge - preserve existing fields when updating
+      if (updateData.chat_analysis) {
+        // Get existing chat to merge chat_analysis
+        const existingChat = await chatsCollection.findOne({ 
+          chat_id: chatId,
+          subaccountId: subaccountId 
+        });
+        const existingChatAnalysis = existingChat?.chat_analysis || {};
+        
+        // IMPORTANT: Preserve chat_successful from existing chat_analysis
+        // chat_successful should ONLY be set when a meeting is actually created/deleted, not from webhook analysis
+        // Extract chat_successful value to preserve it
+        const existingChatSuccessful = existingChatAnalysis.chat_successful;
+        
+        // Merge chat_analysis: new fields override, but preserve existing ones
+        const mergedChatAnalysis = {
+          ...existingChatAnalysis,
+          ...updateData.chat_analysis
+        };
+        
+        // Restore chat_successful value if it existed (it was set from meeting creation/deletion)
+        // Only allow it to be overwritten if explicitly set in updateData (from meeting creation/deletion)
+        if (updateData.chat_analysis.chat_successful !== undefined) {
+          // Explicitly set from meeting creation/deletion - use the new value
+          mergedChatAnalysis.chat_successful = updateData.chat_analysis.chat_successful;
+        } else if (existingChatSuccessful !== undefined) {
+          // Preserve existing value (was set from meeting creation/deletion)
+          mergedChatAnalysis.chat_successful = existingChatSuccessful;
+        } else {
+          // No existing value and not explicitly set - ensure it's not set
+          delete mergedChatAnalysis.chat_successful;
+        }
+        
+        updateOperation.$set.chat_analysis = mergedChatAnalysis;
+      }
+
+      // Add all other updateData fields (except chat_analysis which we handled above)
+      const { chat_analysis, ...otherUpdates } = updateData;
+      Object.assign(updateOperation.$set, otherUpdates);
+
       // Upsert the chat document (match by chat_id and subaccountId for safety)
       const result = await chatsCollection.updateOne(
         { chat_id: chatId, subaccountId: subaccountId },
-        { 
-          $set: {
-            ...updateData,
-            subaccountId: subaccountId,
-            lastUpdatedBy: 'webhook-service',
-            lastUpdatedAt: new Date()
-          },
-          $setOnInsert: {
-            createdAt: new Date(), // Only set on insert, not on update
-            createdBy: 'webhook-service'
-          }
-        },
+        updateOperation,
         { upsert: true }
       );
 
