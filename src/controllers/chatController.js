@@ -266,77 +266,23 @@ class ChatController {
         });
       }
 
-      // Return immediately - process Retell API call asynchronously
-      const duration = Date.now() - startTime;
+      // Send message using Retell with timeout wrapper
+      // Default: 25 seconds to fail gracefully before Heroku's 30s H12 timeout
+      // Can be increased via RETELL_CHAT_TIMEOUT_MS env var if not on Heroku
+      const RETELL_TIMEOUT_MS = parseInt(process.env.RETELL_CHAT_TIMEOUT_MS || '25000', 10);
       
-      res.json({
-        success: true,
-        message: 'Message queued for processing',
-        data: {
-          chat_id: chatId,
-          status: 'processing'
-        },
-        meta: {
-          operationId,
-          duration: `${duration}ms`
-        }
-      });
-
-      // Process Retell API call asynchronously (fire and forget)
-      // This prevents timeouts and improves user experience
-      ChatController.processRetellMessageAsync(
-        retell,
-        chatId,
-        content,
-        subaccountId,
-        userId,
-        chatDocument.agent_id,
-        operationId
-      ).catch(error => {
-        // Log error but don't throw - this is async processing
-        Logger.error('Error processing Retell message asynchronously', {
-          operationId,
-          subaccountId,
-          chatId,
-          error: error.message,
-          stack: error.stack
-        });
-      });
-
-    } catch (error) {
-      const errorInfo = await ChatController.handleError(error, req, operationId, 'sendMessage', startTime);
-      return res.status(errorInfo.statusCode).json(errorInfo.response);
-    }
-  }
-
-  /**
-   * Process Retell message asynchronously
-   * This method handles the Retell API call in the background to prevent timeouts
-   */
-  static async processRetellMessageAsync(
-    retell,
-    chatId,
-    content,
-    subaccountId,
-    userId,
-    agentId,
-    operationId
-  ) {
-    try {
-      Logger.info('Processing Retell message asynchronously', {
+      Logger.debug('Sending Retell chat completion with timeout', {
         operationId,
-        subaccountId,
-        chatId
+        chatId,
+        timeoutMs: RETELL_TIMEOUT_MS
       });
-
-      // Send message using Retell
-      const response = await retell.createChatCompletion(chatId, content);
-
-      // Get database connection
-      const connectionInfo = await connectionPoolManager.getConnection(subaccountId, userId);
-      const { connection } = connectionInfo;
       
-      const chatsCollection = connection.db.collection('chats');
+      const response = await Promise.race([
+        retell.createChatCompletion(chatId, content),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Retell API timeout after ${RETELL_TIMEOUT_MS}ms`)), RETELL_TIMEOUT_MS)
+        )
+      ]);
 
       // Update chat in database with new messages
       const updateData = {
@@ -354,7 +300,7 @@ class ChatController {
       // Update cache
       await redisService.invalidateChat(subaccountId, chatId);
       
-      Logger.info('Chat message processed and stored asynchronously', {
+      Logger.info('Chat message sent and stored', {
         operationId,
         subaccountId,
         chatId,
@@ -370,7 +316,7 @@ class ChatController {
       //   description: `Message sent in chat ${chatId}`,
       //   metadata: {
       //     chatId,
-      //     agentId: agentId,
+      //     agentId: chatDocument.agent_id,
       //     messageCount: response.messages?.length || 0
       //   },
       //   resourceId: chatId,
@@ -378,15 +324,24 @@ class ChatController {
       //   operationId
       // });
 
-    } catch (error) {
-      Logger.error('Error in async Retell message processing', {
-        operationId,
-        subaccountId,
-        chatId,
-        error: error.message,
-        stack: error.stack
+      const duration = Date.now() - startTime;
+
+      res.json({
+        success: true,
+        message: 'Message sent successfully',
+        data: {
+          chat_id: chatId,
+          messages: response.messages
+        },
+        meta: {
+          operationId,
+          duration: `${duration}ms`
+        }
       });
-      throw error; // Re-throw to be caught by caller
+
+    } catch (error) {
+      const errorInfo = await ChatController.handleError(error, req, operationId, 'sendMessage', startTime);
+      return res.status(errorInfo.statusCode).json(errorInfo.response);
     }
   }
 
