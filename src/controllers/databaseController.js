@@ -6338,23 +6338,143 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         chatsWithMessages: 0
       };
 
-      const currentMeetingsData = meetingsAggregation.find(m => m._id === 'current') || { 
+      const currentMeetingsDataRaw = meetingsAggregation.find(m => m._id === 'current') || { 
         totalMeetings: 0,
         uniqueChatIds: []
       };
-      const previousMeetingsData = meetingsAggregation.find(m => m._id === 'previous') || { 
+      const previousMeetingsDataRaw = meetingsAggregation.find(m => m._id === 'previous') || { 
         totalMeetings: 0,
         uniqueChatIds: []
       };
 
-      // IMPORTANT: Calculate success rate from unique chats with meetings, not total meetings
-      // Success rate = (unique chats with meetings / total chats) * 100
+      // Ensure uniqueChatIds is always an array
+      const currentMeetingsData = {
+        totalMeetings: currentMeetingsDataRaw.totalMeetings || 0,
+        uniqueChatIds: Array.isArray(currentMeetingsDataRaw.uniqueChatIds) 
+          ? currentMeetingsDataRaw.uniqueChatIds.filter(id => id != null && id !== '') 
+          : []
+      };
+      const previousMeetingsData = {
+        totalMeetings: previousMeetingsDataRaw.totalMeetings || 0,
+        uniqueChatIds: Array.isArray(previousMeetingsDataRaw.uniqueChatIds) 
+          ? previousMeetingsDataRaw.uniqueChatIds.filter(id => id != null && id !== '') 
+          : []
+      };
+
+      // Also check chats that have appointment_booked in their analysis as a fallback
+      // This handles cases where meetings exist but don't have chat_id set correctly
+      const chatsWithAppointmentBooked = await chatsCollection.aggregate([
+        {
+          $match: {
+            $and: [
+              { subaccountId: subaccountId },
+              {
+                $or: [
+                  { agent_id: agentId },
+                  { agentId: agentId }
+                ]
+              },
+              {
+                start_timestamp: {
+                  $gte: previousPeriodStart.getTime(),
+                  $lte: currentPeriodEnd.getTime()
+                }
+              },
+              {
+                $or: [
+                  { 'call_analysis.custom_analysis_data.appointment_booked': true },
+                  { 'call_analysis.appointment_booked': true },
+                  { 'chat_analysis.custom_analysis_data.appointment_booked': true },
+                  { 'chat_analysis.appointment_booked': true }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          $addFields: {
+            period: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gte: ['$start_timestamp', currentPeriodStart.getTime()] },
+                    { $lte: ['$start_timestamp', currentPeriodEnd.getTime()] }
+                  ]
+                },
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$start_timestamp', previousPeriodStart.getTime()] },
+                        { $lt: ['$start_timestamp', previousPeriodEnd.getTime()] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$period',
+            chatIds: { 
+              $addToSet: {
+                $cond: {
+                  if: { 
+                    $and: [
+                      { $ne: ['$chat_id', null] },
+                      { $ne: ['$chat_id', ''] },
+                      { $ne: [{ $type: '$chat_id' }, 'missing'] }
+                    ]
+                  },
+                  then: '$chat_id',
+                  else: '$$REMOVE'
+                }
+              }
+            }
+          }
+        }
+      ]).toArray();
+
+      const currentChatsWithAppointmentRaw = chatsWithAppointmentBooked.find(c => c._id === 'current')?.chatIds || [];
+      const previousChatsWithAppointmentRaw = chatsWithAppointmentBooked.find(c => c._id === 'previous')?.chatIds || [];
+      
+      // Filter out any null/undefined values and ensure arrays
+      const currentChatsWithAppointment = Array.isArray(currentChatsWithAppointmentRaw) 
+        ? currentChatsWithAppointmentRaw.filter(id => id != null && id !== '') 
+        : [];
+      const previousChatsWithAppointment = Array.isArray(previousChatsWithAppointmentRaw) 
+        ? previousChatsWithAppointmentRaw.filter(id => id != null && id !== '') 
+        : [];
+
+      // Combine meetings-based success with analysis-based success
+      // Use Set to get unique chat IDs from both sources
+      const currentSuccessfulChatIds = new Set([
+        ...currentMeetingsData.uniqueChatIds,
+        ...currentChatsWithAppointment
+      ]);
+      const previousSuccessfulChatIds = new Set([
+        ...previousMeetingsData.uniqueChatIds,
+        ...previousChatsWithAppointment
+      ]);
+
+      // IMPORTANT: Calculate success rate from unique chats with meetings OR appointment_booked=true
+      // Success rate = (unique chats with meetings/appointments / total chats) * 100
       // This ensures accuracy since one chat can have multiple meetings
       const currentSuccessRate = currentChatsData.totalChats > 0 
-        ? ((currentMeetingsData.uniqueChatIds?.length || 0) / currentChatsData.totalChats) * 100 
+        ? (currentSuccessfulChatIds.size / currentChatsData.totalChats) * 100 
         : 0;
       const previousSuccessRate = previousChatsData.totalChats > 0 
-        ? ((previousMeetingsData.uniqueChatIds?.length || 0) / previousChatsData.totalChats) * 100 
+        ? (previousSuccessfulChatIds.size / previousChatsData.totalChats) * 100 
         : 0;
 
       // Calculate metrics
@@ -6362,7 +6482,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         totalChats: currentChatsData.totalChats,
         meetingsBooked: currentMeetingsData.totalMeetings,
         unresponsiveChats: currentChatsData.unresponsiveChats,
-        cumulativeSuccessRate: currentSuccessRate,
+        successRate: currentSuccessRate, // Changed from cumulativeSuccessRate to successRate for chats
         costPerChat: currentChatsData.totalChats > 0 
           ? currentChatsData.totalCost / currentChatsData.totalChats 
           : 0,
@@ -6377,7 +6497,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         totalChats: previousChatsData.totalChats,
         meetingsBooked: previousMeetingsData.totalMeetings,
         unresponsiveChats: previousChatsData.unresponsiveChats,
-        cumulativeSuccessRate: previousSuccessRate,
+        successRate: previousSuccessRate, // Changed from cumulativeSuccessRate to successRate for chats
         costPerChat: previousChatsData.totalChats > 0 
           ? previousChatsData.totalCost / previousChatsData.totalChats 
           : 0,
@@ -6409,7 +6529,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
           totalChats: currentStats.totalChats,
           meetingsBooked: currentStats.meetingsBooked,
           unresponsiveChats: currentStats.unresponsiveChats,
-          cumulativeSuccessRate: Math.round(currentStats.cumulativeSuccessRate * 100) / 100,
+          successRate: Math.round(currentStats.successRate * 100) / 100,
           costPerChat: Math.round(currentStats.costPerChat * 100) / 100,
           avgMessageCount: Math.round(currentStats.avgMessageCount * 100) / 100,
           periodStart: currentStats.periodStart.toISOString(),
@@ -6419,7 +6539,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
           totalChats: previousStats.totalChats,
           meetingsBooked: previousStats.meetingsBooked,
           unresponsiveChats: previousStats.unresponsiveChats,
-          cumulativeSuccessRate: Math.round(previousStats.cumulativeSuccessRate * 100) / 100,
+          successRate: Math.round(previousStats.successRate * 100) / 100,
           costPerChat: Math.round(previousStats.costPerChat * 100) / 100,
           avgMessageCount: Math.round(previousStats.avgMessageCount * 100) / 100,
           periodStart: previousStats.periodStart.toISOString(),
@@ -6444,7 +6564,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
               calculatePercentageChange(currentStats.unresponsiveChats, previousStats.unresponsiveChats) * 100
             ) / 100
           },
-          cumulativeSuccessRate: {
+          successRate: {
             change: Math.round((currentSuccessRate - previousSuccessRate) * 100) / 100,
             percentageChange: Math.round(
               calculatePercentageChange(currentSuccessRate, previousSuccessRate) * 100
