@@ -5574,31 +5574,133 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
       };
 
       // Parse meetings aggregation results
-      const currentMeetingsData = meetingsAggregation.find(m => m._id === 'current') || {
+      const currentMeetingsDataRaw = meetingsAggregation.find(m => m._id === 'current') || {
         totalMeetings: 0,
         uniqueChatIds: []
       };
-      const previousMeetingsData = meetingsAggregation.find(m => m._id === 'previous') || {
+      const previousMeetingsDataRaw = meetingsAggregation.find(m => m._id === 'previous') || {
         totalMeetings: 0,
         uniqueChatIds: []
       };
 
+      // Ensure uniqueChatIds is always an array (MongoDB $addToSet might return undefined)
+      const currentMeetingsData = {
+        totalMeetings: currentMeetingsDataRaw.totalMeetings || 0,
+        uniqueChatIds: Array.isArray(currentMeetingsDataRaw.uniqueChatIds) 
+          ? currentMeetingsDataRaw.uniqueChatIds 
+          : []
+      };
+      const previousMeetingsData = {
+        totalMeetings: previousMeetingsDataRaw.totalMeetings || 0,
+        uniqueChatIds: Array.isArray(previousMeetingsDataRaw.uniqueChatIds) 
+          ? previousMeetingsDataRaw.uniqueChatIds 
+          : []
+      };
+
+      // Also check chats that have appointment_booked in their analysis as a fallback
+      // This handles cases where meetings exist but don't have chat_id set correctly
+      const chatsWithAppointmentBooked = await chatsCollection.aggregate([
+        {
+          $match: {
+            $and: [
+              { subaccountId: subaccountId },
+              {
+                $or: [
+                  { agent_id: agentId },
+                  { agentId: agentId }
+                ]
+              },
+              {
+                start_timestamp: {
+                  $gte: previousPeriodStart.getTime(),
+                  $lte: currentPeriodEnd.getTime()
+                }
+              },
+              {
+                $or: [
+                  { 'call_analysis.custom_analysis_data.appointment_booked': true },
+                  { 'call_analysis.appointment_booked': true },
+                  { 'chat_analysis.custom_analysis_data.appointment_booked': true },
+                  { 'chat_analysis.appointment_booked': true }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          $addFields: {
+            period: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gte: ['$start_timestamp', currentPeriodStart.getTime()] },
+                    { $lte: ['$start_timestamp', currentPeriodEnd.getTime()] }
+                  ]
+                },
+                then: 'current',
+                else: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $gte: ['$start_timestamp', previousPeriodStart.getTime()] },
+                        { $lt: ['$start_timestamp', previousPeriodEnd.getTime()] }
+                      ]
+                    },
+                    then: 'previous',
+                    else: 'excluded'
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          $match: {
+            period: { $in: ['current', 'previous'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$period',
+            chatIds: { $addToSet: '$chat_id' }
+          }
+        }
+      ]).toArray();
+
+      const currentChatsWithAppointment = chatsWithAppointmentBooked.find(c => c._id === 'current')?.chatIds || [];
+      const previousChatsWithAppointment = chatsWithAppointmentBooked.find(c => c._id === 'previous')?.chatIds || [];
+
+      // Combine meetings-based success with analysis-based success
+      // Use Set to get unique chat IDs from both sources
+      const currentSuccessfulChatIds = new Set([
+        ...(currentMeetingsData.uniqueChatIds || []),
+        ...(currentChatsWithAppointment || [])
+      ]);
+      const previousSuccessfulChatIds = new Set([
+        ...(previousMeetingsData.uniqueChatIds || []),
+        ...(previousChatsWithAppointment || [])
+      ]);
+
       // Combine stats with meetings data
+      // IMPORTANT: Calculate success rate from unique chats with meetings OR appointment_booked=true
+      // Success rate = (unique chats with meetings/appointments / total chats) * 100
+      const uniqueChatIdsCount = currentSuccessfulChatIds.size;
       const currentStats = {
         totalChats: currentStatsRaw.totalChats,
         meetingsBooked: currentMeetingsData.totalMeetings,
-        successfulChats: currentMeetingsData.uniqueChatIds.length,
+        successfulChats: uniqueChatIdsCount,
         successRate: currentStatsRaw.totalChats > 0 
-          ? (currentMeetingsData.uniqueChatIds.length / currentStatsRaw.totalChats) * 100 
+          ? (uniqueChatIdsCount / currentStatsRaw.totalChats) * 100 
           : 0
       };
 
+      const previousUniqueChatIdsCount = previousSuccessfulChatIds.size;
       const previousStats = {
         totalChats: previousStatsRaw.totalChats,
         meetingsBooked: previousMeetingsData.totalMeetings,
-        successfulChats: previousMeetingsData.uniqueChatIds.length,
+        successfulChats: previousUniqueChatIdsCount,
         successRate: previousStatsRaw.totalChats > 0 
-          ? (previousMeetingsData.uniqueChatIds.length / previousStatsRaw.totalChats) * 100 
+          ? (previousUniqueChatIdsCount / previousStatsRaw.totalChats) * 100 
           : 0
       };
 
