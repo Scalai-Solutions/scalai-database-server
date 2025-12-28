@@ -5662,46 +5662,98 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
         {
           $group: {
             _id: '$period',
-            chatIds: { $addToSet: '$chat_id' }
+            chatIds: { 
+              $addToSet: {
+                $cond: {
+                  if: { 
+                    $and: [
+                      { $ne: ['$chat_id', null] },
+                      { $ne: ['$chat_id', ''] },
+                      { $ne: [{ $type: '$chat_id' }, 'missing'] }
+                    ]
+                  },
+                  then: '$chat_id',
+                  else: '$$REMOVE'
+                }
+              }
+            }
           }
         }
       ]).toArray();
 
-      const currentChatsWithAppointment = chatsWithAppointmentBooked.find(c => c._id === 'current')?.chatIds || [];
-      const previousChatsWithAppointment = chatsWithAppointmentBooked.find(c => c._id === 'previous')?.chatIds || [];
+      const currentChatsWithAppointmentRaw = chatsWithAppointmentBooked.find(c => c._id === 'current')?.chatIds || [];
+      const previousChatsWithAppointmentRaw = chatsWithAppointmentBooked.find(c => c._id === 'previous')?.chatIds || [];
+      
+      // Filter out any null/undefined values and ensure arrays
+      const currentChatsWithAppointment = Array.isArray(currentChatsWithAppointmentRaw) 
+        ? currentChatsWithAppointmentRaw.filter(id => id != null && id !== '') 
+        : [];
+      const previousChatsWithAppointment = Array.isArray(previousChatsWithAppointmentRaw) 
+        ? previousChatsWithAppointmentRaw.filter(id => id != null && id !== '') 
+        : [];
 
       // Combine meetings-based success with analysis-based success
       // Use Set to get unique chat IDs from both sources
+      const currentMeetingsChatIds = Array.isArray(currentMeetingsData.uniqueChatIds) 
+        ? currentMeetingsData.uniqueChatIds.filter(id => id != null && id !== '') 
+        : [];
+      const previousMeetingsChatIds = Array.isArray(previousMeetingsData.uniqueChatIds) 
+        ? previousMeetingsData.uniqueChatIds.filter(id => id != null && id !== '') 
+        : [];
+      
       const currentSuccessfulChatIds = new Set([
-        ...(currentMeetingsData.uniqueChatIds || []),
-        ...(currentChatsWithAppointment || [])
+        ...currentMeetingsChatIds,
+        ...currentChatsWithAppointment
       ]);
       const previousSuccessfulChatIds = new Set([
-        ...(previousMeetingsData.uniqueChatIds || []),
-        ...(previousChatsWithAppointment || [])
+        ...previousMeetingsChatIds,
+        ...previousChatsWithAppointment
       ]);
 
       // Combine stats with meetings data
       // IMPORTANT: Calculate success rate from unique chats with meetings OR appointment_booked=true
       // Success rate = (unique chats with meetings/appointments / total chats) * 100
       const uniqueChatIdsCount = currentSuccessfulChatIds.size;
-      const currentStats = {
-        totalChats: currentStatsRaw.totalChats,
-        meetingsBooked: currentMeetingsData.totalMeetings,
+      const totalChatsCount = currentStatsRaw.totalChats || 0;
+      
+      // Calculate success rate explicitly - ensure we don't divide by zero
+      let calculatedSuccessRate = 0;
+      if (totalChatsCount > 0 && uniqueChatIdsCount > 0) {
+        calculatedSuccessRate = (uniqueChatIdsCount / totalChatsCount) * 100;
+      }
+      
+      Logger.info('Chat agent success rate calculation', {
+        operationId,
+        subaccountId,
+        agentId,
+        totalChats: totalChatsCount,
         successfulChats: uniqueChatIdsCount,
-        successRate: currentStatsRaw.totalChats > 0 
-          ? (uniqueChatIdsCount / currentStatsRaw.totalChats) * 100 
-          : 0
+        meetingsChatIds: currentMeetingsChatIds.length,
+        appointmentChatIds: currentChatsWithAppointment.length,
+        calculatedSuccessRate,
+        currentSuccessfulChatIdsArray: Array.from(currentSuccessfulChatIds),
+        currentMeetingsChatIdsArray: currentMeetingsChatIds,
+        currentChatsWithAppointmentArray: currentChatsWithAppointment
+      });
+      
+      const currentStats = {
+        totalChats: totalChatsCount,
+        meetingsBooked: currentMeetingsData.totalMeetings || 0,
+        successfulChats: uniqueChatIdsCount,
+        successRate: calculatedSuccessRate
       };
 
       const previousUniqueChatIdsCount = previousSuccessfulChatIds.size;
+      const previousTotalChatsCount = previousStatsRaw.totalChats || 0;
+      const previousCalculatedSuccessRate = previousTotalChatsCount > 0 
+        ? (previousUniqueChatIdsCount / previousTotalChatsCount) * 100 
+        : 0;
+      
       const previousStats = {
-        totalChats: previousStatsRaw.totalChats,
-        meetingsBooked: previousMeetingsData.totalMeetings,
+        totalChats: previousTotalChatsCount,
+        meetingsBooked: previousMeetingsData.totalMeetings || 0,
         successfulChats: previousUniqueChatIdsCount,
-        successRate: previousStatsRaw.totalChats > 0 
-          ? (previousUniqueChatIdsCount / previousStatsRaw.totalChats) * 100 
-          : 0
+        successRate: previousCalculatedSuccessRate
       };
 
       // Step 3: Calculate percentage changes
