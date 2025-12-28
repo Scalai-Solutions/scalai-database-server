@@ -956,6 +956,7 @@ class ChatController {
         // Extract chat_successful value to preserve it
         const existingChatSuccessful = existingChatAnalysis.chat_successful;
         
+        
         // Check if this update is from meeting creation/deletion (has special marker)
         const isFromMeetingCreation = updateData._fromMeetingCreation === true;
         const isFromMeetingDeletion = updateData._fromMeetingDeletion === true;
