@@ -89,41 +89,31 @@ class DatabaseController {
           type: "mcp",
           speak_during_execution: false
         },
-        // {
-        //   execution_message_description: "",
-        //   speak_after_execution: true,
-        //   name: "create_appointment",
-        //   description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
-        //   response_variables: {},
-        //   mcp_id: mcpId,
-        //   type: "mcp",
-        //   speak_during_execution: false
-        // },
-        // {
-        //   execution_message_description: "",
-        //   speak_after_execution: true,
-        //   name: "update_appointment",
-        //   description: "Update an existing appointment/meeting. Can update any field.",
-        //   response_variables: {},
-        //   mcp_id: mcpId,
-        //   type: "mcp",
-        //   speak_during_execution: false
-        // },
-        // {
-        //   execution_message_description: "",
-        //   speak_after_execution: true,
-        //   name: "delete_appointment",
-        //   description: "Permanently delete an appointment by its ID.",
-        //   response_variables: {},
-        //   mcp_id: mcpId,
-        //   type: "mcp",
-        //   speak_during_execution: false
-        // },
         {
           execution_message_description: "",
           speak_after_execution: true,
-          name: "manage_appointment",
-          description: `Unified appointment management tool for booking, updating, and cancelling appointments. Sends email notifications for all operations. Use operationType to specify the action: "booking" to create new, "update" to modify existing (requires previousDetails), "cancellation" to cancel.`,
+          name: "create_appointment",
+          description: "Create a new appointment/meeting. Checks for conflicts with existing meetings.",
+          response_variables: {},
+          mcp_id: mcpId,
+          type: "mcp",
+          speak_during_execution: false
+        },
+        {
+          execution_message_description: "",
+          speak_after_execution: true,
+          name: "update_appointment",
+          description: "Update an existing appointment/meeting. Can update any field.",
+          response_variables: {},
+          mcp_id: mcpId,
+          type: "mcp",
+          speak_during_execution: false
+        },
+        {
+          execution_message_description: "",
+          speak_after_execution: true,
+          name: "delete_appointment",
+          description: "Permanently delete an appointment by its ID.",
           response_variables: {},
           mcp_id: mcpId,
           type: "mcp",
