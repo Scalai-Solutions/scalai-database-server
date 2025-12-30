@@ -3920,7 +3920,7 @@ Agent: "Hi Hritik! How can I help you today?" ← Already has all context
     }
   }
 
-  // ========== CHAT AGENTS METHODS ==========
+  // ========== CHAT AGENTS METHODS  ==========
 
   // Create chat agent
   static async createChatAgent(req, res, next) {
